@@ -1,0 +1,205 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@version=5
+strategy(title="BotzPh03n1x PRODUCTION STANDARD",overlay=true, default_qty_type=strategy.cash, commission_value= 0.07, commission_type=strategy.commission.percent, slippage=1, currency=currency.USD, default_qty_value= 100, initial_capital= 100, use_bar_magnifier = true, process_orders_on_close=true)
+
+
+//def and input
+
+fastLength = input(title="MACD Fast Length", type=input.integer, defval=23)
+slowLength = input(title="MACD Slow Length", type=input.integer, defval=50)
+cycleLength = input(title="Cycle Length", type=input.integer, defval=10)
+d1Length = input(title="1st %D Length", type=input.integer, defval=3)
+d2Length = input(title="2nd %D Length", type=input.integer, defval=3)
+src = input(title="Source", type=input.source, defval=close)
+upper = input(title="Upper Band", type=input.integer, defval=75)
+lower = input(title="Lower Band", type=input.integer, defval=25)
+highlightBreakouts = input(title="Highlight Breakouts ?", type=input.bool, defval=true)
+
+tslentry = input.bool(false, title = "Use Trailing Stop?")
+longTakeProfitPerc = input.float(1, 'Long&Short Take Profit %', minval=0.05, step=0.05) * 0.01
+shortTakeProfitPerc = longTakeProfitPerc//input.float(0.5, 'Short Take Profit %', minval=0.05, step=0.05) * 0.01
+trailingTakeProfitPerc = input.float(0.3, 'Trailing Take Profit %', minval=0.01, maxval=100, step=0.01) * 0.01
+fixedorper = input.bool(true, title = "Fixed position size or % of equity position size ? (default: fixed)")
+PosAmountPercent= input.float(50, "Pos Size % of Total Equity", minval = 1, step=1, tooltip='Same As Order Size in the properties tab')
+bool atrfilter = input.bool(true, title = "Use ATR Filter ?")
+float atrpercent = input.float(1, "ATR %", minval=0.01, maxval=100, step=0.1)
+bool adxfilter = input.bool(false, title = "Use ADX Filter?")
+int adxval = input.int(25, title = "ADX thresold")
+
+float maxlossentry = input.float(25, "MAX LOSS", minval=1, maxval=100, step=1)
+timeSL = input.int(24, "Time in bars to close the position", minval=2, step=1)
+spot = input.bool(false, "SPOT?")
+wunder = input.bool(false, "WunderTrading?", tooltip='By default for Alertatron, check the box to activate for WunderTrading')
+wunder_key = input.string("wunder_key", title="Wunder Key", tooltip='Only the end of the key with the name of the bot and the number, ex: FTX-VXD-CEL-15M_15M_6507dc9b622017e3')
+
+adxlen = 14
+dilen = 14
+
+dirmov(len) =>
+	up = ta.change(high)
+	down = -ta.change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+sig = adx(dilen, adxlen)
+adxvalid = sig > adxval
+
+macd = ema(src, fastLength) - ema(src, slowLength)
+k = nz(fixnan(stoch(macd, macd, macd, cycleLength)))
+d = ema(k, d1Length)
+kd = nz(fixnan(stoch(d, d, d, cycleLength)))
+stc = ema(kd, d2Length)
+stc := max(min(stc, 100), 0)
+
+stcColor1 = stc > stc[1] ? color.green : color.red
+stcColor2 = stc > upper ? color.green : stc <= lower ? color.red : color.orange
+
+stcColor = highlightBreakouts ? stcColor2 : stcColor1
+stcPlot = plot(stc, title="STC", color=stcColor, transp=0)
+
+upperLevel = plot(upper, title="Upper", color=color.gray)
+hline(50, title="Middle", linestyle=hline.style_dotted)
+lowerLevel = plot(lower, title="Lower", color=color.gray)
+
+fill(upperLevel, lowerLevel, title="Middle Zone", color=#f9cb9c, transp=90)
+
+upperFillColor = stc > upper and highlightBreakouts ? color.green : na
+lowerFillColor = stc < lower and highlightBreakouts ? color.red : na
+
+fill(upperLevel, stcPlot, color=upperFillColor, transp=80)
+fill(lowerLevel, stcPlot, color=lowerFillColor, transp=80)
+
+buySignal = crossover(stc, lower)
+sellSignal = crossunder(stc, upper)
+upperCrossover = crossover(stc, upper)
+upperCrossunder = crossunder(stc, upper)
+lowerCrossover = crossover(stc, lower)
+lowerCrossunder = crossunder(stc, lower)
+
+//stop and take
+p = 10
+x = 1
+q = 9
+first_high_stop = ta.highest(high, p) - x * ta.atr(p)
+first_low_stop = ta.lowest(low, p) + x * ta.atr(p)
+stop_short = ta.highest(first_high_stop, q)
+stop_long = ta.lowest(first_low_stop, q)
+
+//var min_loss = 0.0
+//var max_loss = 0.0
+
+loss_per_long = ((close - stop_long) / close) * 100
+loss_per_short = ((stop_short - close) / close) * 100
+//min_loss := math.min(loss_per_short, loss_per_long) < 0 ? min_loss : min_loss < math.min(loss_per_short, loss_per_long) ? min_loss : math.min(loss_per_short, loss_per_long)
+//max_loss := math.max(loss_per_short, loss_per_long) < 0 ? max_loss : max_loss > math.max(loss_per_short, loss_per_long) ? max_loss : math.max(loss_per_short, loss_per_long)
+max_loss = maxlossentry
+pos_per_short = 1 - (loss_per_short / max_loss) > 1 ? 1 : 1 - (loss_per_short / max_loss)
+pos_per_long = 1 - (loss_per_long / max_loss) > 1 ? 1 : 1 - (loss_per_long / max_loss)
+//pos_size_long = fixedorper ? ((strategy.initial_capital * (PosAmountPercent / 100)) * 0.5) / close : ((strategy.equity * (PosAmountPercent / 100)) * 0.5) / close
+//pos_size_short = fixedorper ? ((strategy.initial_capital * (PosAmountPercent / 100)) * 0.5) / close : ((strategy.equity * (PosAmountPercent / 100)) * 0.5) / close
+pos_size_long = fixedorper ? ((strategy.initial_capital * (PosAmountPercent / 100)) * math.abs(pos_per_long)) / close : ((strategy.equity * (PosAmountPercent / 100)) * math.abs(pos_per_long)) / close
+pos_size_short = fixedorper ? ((strategy.initial_capital * (PosAmountPercent / 100)) * math.abs(pos_per_short)) / close : ((strategy.equity * (PosAmountPercent / 100)) * math.abs(pos_per_short)) / close
+
+
+//single
+BUY=buySignal
+SELL=sellSignal
+
+bool longIsActive = BUY or strategy.position_size > 0
+bool shortIsActive = SELL or strategy.position_size < 0
+
+float longTakeProfitPrice = na
+longTakeProfitPrice := if longIsActive
+    if BUY and not (strategy.position_size > 0)
+        close * (1 + longTakeProfitPerc)
+    else
+        nz(longTakeProfitPrice[1], close * (1 + longTakeProfitPerc))
+else
+    na
+
+float shortTakeProfitPrice = na
+shortTakeProfitPrice := if shortIsActive
+    if SELL and not (strategy.position_size < 0)
+        close * (1 - shortTakeProfitPerc)
+    else
+        nz(shortTakeProfitPrice[1], close * (1 - shortTakeProfitPrice))
+else
+    na
+
+barsSinceLastEntry() =>
+    strategy.opentrades > 0 ? bar_index - strategy.opentrades.entry_bar_index(strategy.opentrades - 1) : na
+
+trail_points_usd = shortIsActive ? (math.abs(close - shortTakeProfitPrice)) : longIsActive ? (math.abs(close - longTakeProfitPrice)) : na//trail_points * syminfo.mintick
+trail_points = trail_points_usd / syminfo.mintick
+
+trail_offset_usd = longIsActive ? longTakeProfitPrice * trailingTakeProfitPerc : shortIsActive ? shortTakeProfitPrice * trailingTakeProfitPerc : na
+trail_offset = trail_offset_usd / syminfo.mintick
+
+// === Alertatron KEY ===//
+alertatron_key_enter_long  = 'cancel(which=all);market(position=0);market(side=buy, amount=' + str.tostring(pos_per_long*PosAmountPercent) + '%);stopOrder(side=sell, amount=100%p, offset=@' + str.tostring(stop_long) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=sell, amount=100%p, triggerOffset=' + str.tostring(trail_points_usd) + ', offset=' + str.tostring(trail_offset_usd) + ', trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_long     = 'limit(position=0, offset=' + str.tostring(trail_offset_usd) + ', reduceOnly=true);'
+alertatron_key_exit_long   = 'market(position=0);'
+alertatron_key_enter_short = 'cancel(which=all);market(position=0);market(side=sell, amount=' + str.tostring(pos_per_short*PosAmountPercent) + '%);stopOrder(side=buy, amount=100%p, offset=@' + str.tostring(stop_short) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=buy, amount=100%p, triggerOffset=' + str.tostring(trail_points_usd) + ', offset=' + str.tostring(trail_offset_usd) + ', trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_short    = 'limit(position=0, offset=' + str.tostring(trail_offset_usd) + ', reduceOnly=true);'
+alertatron_key_exit_short  = 'market(position=0);'
+
+
+// === Wundertrading KEY ===//
+wunder_key_enter_long  = 'ENTER-LONG_' + wunder_key
+wunder_key_exit_long   = 'EXIT-LONG_'  + wunder_key
+wunder_key_enter_short = 'ENTER-SHORT_' + wunder_key
+wunder_key_exit_short  = 'EXIT-SHORT_'  + wunder_key
+
+
+//order/
+if not strategy.opentrades and (atrfilter==true ? (ta.atr(length = 14)/close)*100 > atrpercent : false) and (adxfilter == true ? sig > adxval : true)
+    // Long Strategy
+    if BUY
+        strategy.entry("Long", strategy.long, qty=pos_size_long, comment='Buy!', alert_message= not wunder ? alertatron_key_enter_long : wunder_key_enter_long)
+        if tslentry
+            strategy.exit("exit", "Long", stop=stop_long, trail_points=trail_points, trail_offset=trail_offset, comment='Exit Long!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL' + str.tostring(syminfo.mintick), alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long, alert_trailing= not wunder ? alertatron_key_tsl_long : wunder_key_exit_long)
+        if !tslentry
+            strategy.exit("exit", "Long", stop=stop_long, comment='Exit Long!', comment_profit='TP', comment_loss='SL', alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long)
+    
+    // Short Strategy
+    if SELL and not spot
+        strategy.entry("Short", strategy.short, qty=pos_size_short, comment='Sell!', alert_message= not wunder ? alertatron_key_enter_short : wunder_key_enter_short)
+        if tslentry
+            strategy.exit("exit","Short", stop=stop_short, trail_points=trail_points, trail_offset=trail_offset, comment='Exit Short!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL' + str.tostring(syminfo.mintick), alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short, alert_trailing= not wunder ? alertatron_key_tsl_short : wunder_key_exit_short)
+        if !tslentry
+            strategy.exit("exit","Short", stop=stop_short, comment='Exit Short!', comment_profit='TP', comment_loss='SL', alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short)
+        
+if not strategy.opentrades and atrfilter==false and (adxfilter == true ? sig > adxval : true)
+    // Long Strategy
+    if BUY
+        strategy.entry("Long", strategy.long, qty=pos_size_long, comment='Buy!', alert_message= not wunder ? alertatron_key_enter_long : wunder_key_enter_long)
+        if tslentry
+            strategy.exit("exit", "Long", stop=stop_long, trail_points=trail_points, trail_offset=trail_offset, comment='Exit Long!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL' + str.tostring(syminfo.mintick), alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long, alert_trailing= not wunder ? alertatron_key_tsl_long : wunder_key_exit_long)
+        if !tslentry
+            strategy.exit("exit", "Long", stop=stop_long, comment='Exit Long!', comment_profit='TP', comment_loss='SL', alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long)
+    
+    // Short Strategy/
+    if SELL and not spot
+        strategy.entry("Short", strategy.short, qty=pos_size_short, comment='Sell!', alert_message= not wunder ? alertatron_key_enter_short : wunder_key_enter_short)
+        if tslentry
+            strategy.exit("exit","Short", stop=stop_short, trail_points=trail_points, trail_offset=trail_offset, comment='Exit Short!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL' + str.tostring(syminfo.mintick), alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short, alert_trailing= not wunder ? alertatron_key_tsl_short : wunder_key_exit_short)
+        if !tslentry
+            strategy.exit("exit","Short", stop=stop_short, comment='Exit Short!', comment_profit='TP', comment_loss='SL', alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short)
+        
+
+
+
+if barsSinceLastEntry() >= timeSL
+    strategy.close("Long", comment='SL Long TIME', alert_message= not wunder ? alertatron_key_exit_long : wunder_key_exit_long)
+    strategy.close("Short", comment='SL Short TIME', alert_message= not wunder ? alertatron_key_exit_short : wunder_key_exit_short)
+
+//buyplot = BUY ? 1 : 0
+//plot(buyplot)
