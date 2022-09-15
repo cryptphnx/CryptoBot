@@ -1,0 +1,148 @@
+//@version=5
+
+strategy('Ichimoku Crypto Strat',overlay=true, default_qty_type=strategy.cash, commission_value= 0.07, commission_type=strategy.commission.percent, slippage=1, currency=currency.USD, default_qty_value= 100, initial_capital= 100, use_bar_magnifier = true, process_orders_on_close=true)
+
+//Inputs
+ts_bars = input.int(20, minval=1, title='Tenkan-Sen Bars')
+ks_bars = input.int(60, minval=1, title='Kijun-Sen Bars')
+ssb_bars = input.int(120, minval=1, title='Senkou-Span B Bars')
+cs_offset = input.int(30, minval=1, title='Chikou-Span Offset')
+ss_offset = input.int(30, minval=1, title='Senkou-Span Offset')
+
+strat = input.string(defval = "Cross Tenkan", title = "Active Strategy", options = ["Cross Tenkan", "Cross Kijun"]) 
+
+longTakeProfitPerc = input.float(1, 'Long&Short Take Profit %', minval=0.05, step=0.05) * 0.01
+shortTakeProfitPerc = longTakeProfitPerc//input.float(0.5, 'Short Take Profit %', minval=0.05, step=0.05) * 0.01
+trailingTakeProfitPerc = input.float(0.3, 'Trailing Take Profit %', minval=0.01, maxval=100, step=0.01) * 0.01
+fixedorper = input.bool(true, title = "Fixed position size or % of equity position size ? (default: fixed)")
+PosAmountPercent= input.float(50, "Pos Size % of Total Equity", minval = 1, step=1, tooltip='Same As Order Size in the properties tab')
+bool atrfilter = input.bool(true, title = "Use ATR Filter ?")
+float atrpercent = input.float(1, "ATR %", minval=0.01, maxval=100, step=0.1)
+bool adxfilter = input.bool(false, title = "Use ADX Filter?")
+int adxval = input.int(25, title = "ADX thresold")
+
+timeSL = input.int(24, "Time in bars to close the position", minval=2, step=1)
+spot = input.bool(false, "SPOT?")
+wunder = input.bool(false, "WunderTrading?", tooltip='By default for Alertatron, check the box to activate for WunderTrading')
+wunder_key = input.string("wunder_key", title="Wunder Key", tooltip='Only the end of the key with the name of the bot and the number, ex: FTX-VXD-CEL-15M_15M_6507dc9b622017e3')
+
+// ADX
+
+adxlen = 14
+dilen = 14
+
+dirmov(len) =>
+	up = ta.change(high)
+	down = -ta.change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+sig = adx(dilen, adxlen)
+adxvalid = sig > adxval
+
+// ICHIMOKU
+
+middle(len) =>
+    math.avg(ta.lowest(len), ta.highest(len))
+
+// Ichimoku Components
+tenkan = middle(ts_bars)
+kijun = middle(ks_bars)
+senkouA = math.avg(tenkan, kijun)
+senkouB = middle(ssb_bars)
+
+// Plot Ichimoku Kinko Hyo
+plot(tenkan, color=color.new(#0496ff, 0), title='Tenkan-Sen')
+plot(kijun, color=color.new(#991515, 0), title='Kijun-Sen')
+plot(close, offset=-cs_offset + 1, color=color.new(#459915, 0), title='Chikou-Span')
+sa = plot(senkouA, offset=ss_offset - 1, color=color.new(color.green, 0), title='Senkou-Span A')
+sb = plot(senkouB, offset=ss_offset - 1, color=color.new(color.red, 0), title='Senkou-Span B')
+fill(sa, sb, color=senkouA > senkouB ? color.green : color.red, title='Cloud color', transp=90)
+
+ss_high = math.max(senkouA[ss_offset - 1], senkouB[ss_offset - 1])
+ss_low = math.min(senkouA[ss_offset - 1], senkouB[ss_offset - 1])
+
+//stop and take
+p = 10
+x = 1
+q = 9
+first_high_stop = ta.highest(high, p) - x * ta.atr(p)
+first_low_stop = ta.lowest(low, p) + x * ta.atr(p)
+stop_short = ta.highest(first_high_stop, q)
+stop_long = ta.lowest(first_low_stop, q)
+
+
+
+// Filters
+
+adxfil = adxfilter ? adxvalid : true
+atrfil = atrfilter ? (ta.atr(length = 14)/close)*100 > atrpercent : true)
+fil = adxfil and atrfil
+
+// Entry/Exit Signals
+tk_cross_bull = close > tenkan
+tk_cross_bear = close < tenkan
+
+kj_cross_bull = close > kijun
+kj_cross_bear = close < kijun
+
+cs_cross_bull = ta.mom(close, cs_offset - 1) > 0
+cs_cross_bear = ta.mom(close, cs_offset - 1) < 0
+price_above_kumo = close > ss_high
+price_below_kumo = close < ss_low
+
+BUY = strat == "Cross Tenkan" ? tk_cross_bull and cs_cross_bull and price_above_kumo and fil : kj_cross_bull and cs_cross_bull and price_above_kumo and fil
+SELL = strat == "Cross Tenkan" ? tk_cross_bear and cs_cross_bear and price_below_kumo and fil : kj_cross_bear and cs_cross_bear and price_below_kumo and fil
+
+bool longIsActive = BUY or strategy.position_size > 0
+bool shortIsActive = SELL or strategy.position_size < 0
+
+float longTakeProfitPrice = na
+longTakeProfitPrice := if longIsActive
+    if BUY and not (strategy.position_size > 0)
+        close * (1 + longTakeProfitPerc)
+    else
+        nz(longTakeProfitPrice[1], close * (1 + longTakeProfitPerc))
+else
+    na
+
+float shortTakeProfitPrice = na
+shortTakeProfitPrice := if shortIsActive
+    if SELL and not (strategy.position_size < 0)
+        close * (1 - shortTakeProfitPerc)
+    else
+        nz(shortTakeProfitPrice[1], close * (1 - shortTakeProfitPrice))
+else
+    na
+
+barsSinceLastEntry() =>
+    strategy.opentrades > 0 ? bar_index - strategy.opentrades.entry_bar_index(strategy.opentrades - 1) : na
+
+trail_points_usd = shortIsActive ? (math.abs(close - shortTakeProfitPrice)) : longIsActive ? (math.abs(close - longTakeProfitPrice)) : na//trail_points * syminfo.mintick
+trail_points = trail_points_usd / syminfo.mintick
+
+trail_offset_usd = longIsActive ? longTakeProfitPrice * trailingTakeProfitPerc : shortIsActive ? shortTakeProfitPrice * trailingTakeProfitPerc : na
+trail_offset = trail_offset_usd / syminfo.mintick
+
+if  not strategy.opentrades and BUY
+    strategy.entry('Long', strategy.long)
+    strategy.exit("exit", "Long", stop=stop_long, trail_points=trail_points, trail_offset=trail_offset)
+
+if not strategy.opentrades and SELL
+    strategy.entry('Short', strategy.short)
+    strategy.exit("exit","Short", stop=stop_short, trail_points=trail_points, trail_offset=trail_offset)
+
+
+if longIsActive and (barsSinceLastEntry() >= timeSL or ta.crossunder(close, strat == "Cross Tenkan" ? tenkan : kijun))
+    strategy.close('Long')
+
+if shortIsActive and (barsSinceLastEntry() >= timeSL or ta.crossover(close, strat == "Cross Tenkan" ? tenkan : kijun))
+    strategy.close('Short')
+
