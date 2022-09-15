@@ -1,0 +1,1385 @@
+//@version=4
+//@author=CryptoPh03n1x
+
+// CONVERSION FROM STUDY (INDICATOR) TO STRATEGY
+//      1.  Comment out study() statement at the beginning of the script.
+//      2.  Uncomment strategy() statement preceding it.
+//      3.  Uncomment last 3 lines of script.
+//      4.  Save and voilà!
+
+var SystemName = "CryptoPh03n1x Trading Bot"
+var ShortSystemName = "CryptoPh03n1x Trading Bot"
+// This string is to personalize the text that appears with your orders on the chart through strategy() calls and entry/exit markers, and in the alert default message.
+// Although leaving it empty will not cause problems in study mode,
+// IT MUST BE NON NULL WHEN THIS CODE IS COMPILED AS A STRATEGY, otherwise you will get a server error. A space is legal.
+var TradeId = "BTE"
+// These values are used both in the strategy() header and in the script's relevant inputs as default values so they match.
+// Unless these values match in the script's Inputs and the TV backtesting Properties, results between them cannot be compared.
+var InitCapital = 100.0
+var InitPosition = 100.0
+var InitCommission = 0.075
+var InitPyramidMax = 10
+var OrdersOnClose = false
+
+strategy(title=SystemName, shorttitle=ShortSystemName, overlay=true, initial_capital=InitCapital, currency="USD", default_qty_type=strategy.cash, default_qty_value=InitPosition, commission_type=strategy.commission.percent, commission_value=InitCommission, process_orders_on_close=OrdersOnClose, calc_on_every_tick=true, calc_on_order_fills=true)
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————— 0. Inputs ————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Colors
+MyGreenRaw = color.new(color.lime,0),             MyGreenMedium = color.new(#00b300,0)
+MyRedRaw = color.new(color.red,0),                MyRedMedium = color.new(#cc0000,0)
+MyFuchsiaRaw = color.new(color.fuchsia,0),        MyFuchsiaMedium = color.new(#c000c0,0)
+MyYellowRaw  = color.new(color.yellow,0),         MyYellowMedium  = color.new(#c0c000,0)
+MyOrangeRaw = color.new(#ffa500,0),               MyOrangeMedium = color.new(#cc8400,0)      
+MyBlueRaw   = color.new(#4985E7,0),               MyBlueMedium   = color.new(#4985E7,0)     
+MyGreenBackGround = color.new(#00FF00,93),        MyRedBackGround = color.new(#FF0000,90)
+MyGreenSemiDark = color.new(#009900,0),           MyRedSemiDark = color.new(#990000,0)
+MyFuchsiaDark = color.new(#800080,0),             MyYellowDark  = color.new(#808000,0)
+MyOrangeDark = color.new(#996300,0),              MyYellowDarkDark  = color.new(#404000,0)
+MyRedDarkDark = color.new(#330000,0),             MyGreenDark = color.new(#006600,0)
+MyRedDark = color.new(#330000,0),                 MyFuchsiaDarkDark = color.new(#400040,0)
+MyGreenDarkDark = color.new(#003300,0)
+
+
+// ——————————————— Inputs and states
+// ————— A. Option list statics.
+// global STrategy option
+ST0 = "0. Manual",                  ST1 = "1. BTC3mBOTH",              ST2 = "2. Range trading"
+ST3 = "3. Trend Follow Bull",       ST4 = "4. Trend Follow Bear",       ST5 = "5. Rally Short Against Trend Bull"
+ST6 = "6. Rally Bull Against Trend Bear"
+
+// Trade Direction
+TD1 = "Both",                       TD2 = "Longs Only",                 TD3 = "Shorts Only"
+
+// TRend detection
+TR0 = "0. None",                    TR1 = "1. Ichimoku",                TR2 = "2. MA"   
+TR3 = "3. EMA",                     TR4 = "4. WMA",                     TR5 = "5. Hull MA"
+TR6 = "6. Momentum"
+
+// Higher timeframe Trend detection
+HT0 = "0. None",                    HT1 = "1. Ichimoku",                HT2 = "2. MA"   
+HT3 = "3. EMA",                     HT4 = "4. WMA",                     HT5 = "5. Hull MA"
+HT6 = "6. Momentum"
+
+// ENtrys detection
+EN1 = "1. Ichimoku",                EN2 = "2. Breakout S/R",            EN3 = "3. Bollinger Bands"
+EN4 = "4. Momentum"
+
+// EXits detection
+EX1 = "1. Cross S/R",               EX2 = "2. Ichimoku",                EX3 = "3. RSI Divergence"
+EX4 = "4. Momentum",                EX5 = "5. Take Profit"
+
+// Stop Loss
+SL0 = "0. None",                    SL1 = "1. Cross S/R",               SL2 = "2. Fixed Value"
+SL3 = "3. % Loss on Total Equity",  SL4 = "4. Last Low/Hi"
+
+// Take Profit
+TP0 = "0. None",                    TP1 = "1. Fixed Value",             TP2 = "2. % of Gains"
+TP3 = "3. Trailing at %"
+
+// Pyramiding
+PY1 = "1. Off",                     PY2 = "2. Off but all displayed",   PY3 = "3. On"
+
+// Miscellaneous
+MA1 = "1. RMA",                     MA2 = "2. SMA",                     MA3 = "3. EMA"
+MA4 = "4. WMA"
+
+// Position Sizing
+PS1 = "1. Proportional to Stop -> Variable",                            PS2 = "2. % of Equity -> Variable"
+PS3 = "3. % of Capital -> Fixed "
+
+// Zignaly Key
+ZK1="cf1fc415944280e4431172253e96f49d", ZK0="cf2a8e2746080edffa813460423f9c42", ZK="YourZignalyKey"
+
+
+// Fixed parameters - INIT
+// TD = TD1, TR = TR1, MA = 200, RES1 = "60", HT = HT1, MAH = 50, RES2 = "60", S=25, EN = EN1, EX = EX1, SL = SL3, SLV = 10, SLP = 2.0, TP = TP3, TPV = 10, TPP = 1.0, TPT = 3.0, BBM = 2.0, AT = 200
+
+// Fixed parameters - BTC3mBOTH(Range)
+//TD = TD1, TR = TR5, MA = 180, RES1 = "60", HT = HT3, MAH = 110, RES2 = "60", S=0, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 0.9, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.2, BBM = 2.0, AT = 92
+
+// Fixed parameters - BTC3mBOTH
+// TD = TD1, TR = TR5, MA = 130, RES1 = "60", HT = HT3, MAH = 110, RES2 = "60", S=15, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.4, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.4, BBM = 2.0, AT = 160
+
+// Fixed parameters - BTC3mLONG
+// TD = TD2, TR = TR5, MA = 130, RES1 = "60", HT = HT3, MAH = 110, RES2 = "60", S=15, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.4, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.4, BBM = 2.0, AT = 160
+
+// Fixed parameters - ETH3mBOTH
+// TD = TD1, TR = TR4, MA = 230, RES1 = "60", HT = HT5, MAH = 160, RES2 = "60", S=18, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.3, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.2, BBM = 2.0, AT = 15
+// TD = TD1, TR = TR1, MA = 230, RES1 = "60", HT = HT1, MAH = 160, RES2 = "60", S=0, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.3, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3, BBM = 2.0, AT = 5.0
+
+// Fixed parameters - IOST3mBOTH
+// TD = TD1, TR = TR1, MA = 130, RES1 = "60", HT = HT1, MAH = 110, RES2 = "60", S=22, EN = EN2, EX = EX2, SL = SL3, SLV = 10, SLP = 0.8, TP = TP3, TPV = 10, TPP = 0.1, TPT = 1.9, BBM = 2.0, AT = 15
+
+// Fixed parameters - XRP3mBOTH
+// TD = TD1, TR = TR5, MA = 90, RES1 = "60", HT = HT4, MAH = 50, RES2 = "60", S=37, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.0, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.7, BBM = 2.0, AT = 15
+
+// Fixed parameters - XLM3mBOTH
+// TD = TD1, TR = TR5, MA = 240, RES1 = "60", HT = HT3, MAH = 150, RES2 = "60", S=23, EN = EN3, EX = EX2, SL = SL3, SLV = 10, SLP = 1.4, TP = TP3, TPV = 10, TPP = 0.1, TPT = 2.1, BBM = 2.0, AT = 15
+
+// // Fixed parameters - CRV3mBOTH
+TD = TD1, TR = TR5, MA = 270, RES1 = "60", HT = HT6, MAH = 220, RES2 = "60", S=26, EN = EN3, EX = EX1, SL = SL3, SLV = 10, SLP = 1.4, TP = TP3, TPV = 10, TPP = 0.1, TPT = 3.2, BBM = 3.2, AT = 15
+
+
+// ————— B. Global Statements
+//strat =         input(ST1, "Global Strategy", options=[ST0, ST1, ST2, ST3, ST4, ST5, ST6])
+TradeDirection =input(TD, "Trade Direction", options=[TD1, TD2, TD3])
+long_entry =    TradeDirection!=TD3
+short_entry =   TradeDirection!=TD2
+
+
+// ————— C. Trend Detection
+// Moving Average Inputs
+_0 =            input(true, "═════════════ Trend Detection")
+trend =         input(TR, "Trend detection Strat", options=[TR0, TR1, TR2, TR3, TR4, TR5, TR6])
+
+// Long Moving Average Inputs
+ma_len =        input(MA, title="MA Length", step=10)
+ma_src =        close //input(close, title="MA Source")
+
+// Higher TF Moving Average Inputs
+_1 =            input(true, "═════════════ Higher TF Trend Detection")
+trend_res =     input(title="Trend detection TimeFrame : (Higher than current)", type=input.resolution, defval=RES1)
+trend_htf =     input(HT, "Trend detection Strat", options=[HT0, HT1, HT2, HT3, HT4, HT5, HT6])
+ma_len_htf =    input(MAH, title="Higher TF MA Length", step=10)
+
+// ADX Inputs
+_2 =            input(true, "═════════════ ADX Range Detector")
+adx_res =       input(title="Range Detector TimeFrame : (Higher than current)", type=input.resolution, defval=RES2)
+seuil =         input(S, title="ADX Thresold")
+
+
+// ————— D. Entrys Detection
+_3 =            input(true, "═════════════ Entrys Detection")
+// entry_res =     input(title="Entrys detection TimeFrame :", type=input.resolution, defval="")
+entrys =        input(EN, "Entrys detection Strat", options=[EN1, EN2, EN3, EN4])
+
+
+// ————— E. Exits Detection
+_4 =            input(true, "═════════════ Exits Detection")
+// exit_res =      input(title="Exits detection TimeFrame :", type=input.resolution, defval="")
+exits =         input(EX, "Exits detection Strat", options=[EX1, EX2, EX4, EX5])
+
+
+// ————— F. Stop Loss
+_5 =            input(true, "═════════════ Stop Loss")
+stoploss =      input(SL, "Stop Loss Strat", options=[SL0, SL1, SL2, SL3, SL4])
+sl_value =      input(SLV, title="$ Fixed Value Max to loss")
+sl_per =        input(SLP, step = 0.1, title="% Loss on Total Equity")
+
+
+// ————— G. Take Profit
+_6 =            input(true, "═════════════ Take Profit")
+takeprofit =    input(TP, "Take Profit Strat", options = [TP0, TP1, TP2, TP3])
+tp_value =      input(TPV)
+tp_per =        input(TPP, step=0.1,  title="% Gains. Also used like thresold for enable Trailing Stop")
+tp_trail =      input(TPT, step=0.1, title="Trailing at %")
+
+
+// // ————— H. Pyramiding
+// _7 =            input(true, "═════════════ Pyramiding")
+// pyramid =       input(PY1, "Pyramiding Strat", options = [PY1, PY2, PY3])
+
+// // ————— I. Position sizing
+// PosType =       input(PS2, "═══════════════ Position Sizing", options=[PS1, PS2, PS3])
+// PosType1 =      PosType==PS1
+// PosType2 =      PosType==PS2
+// PosType3 =      PosType==PS3
+// PosTypeCapital =input(InitCapital, title="Initial Capital (In Units of Currency)", minval=0.0, step=10000)
+// PosType1Risk =  input(1.0, title="1. % of Equity Risked Per Trade (Stop% * Position)", minval=0.0, maxval=100.0, step=0.1)
+// PosType1Cap =   input(50.0, title="1. Cap on position sizes (% of Equity)", minval=0.0, maxval=100.0, step=10.0)
+// PosType2Pct =   input(InitPosition, title="2. % of Equity", minval=0.0, maxval=100.0, step=5.0)
+// PosType3Pct =   input(10.0, title="3. % of Initial Capital", minval=0.0, maxval=100.0, step=5.0)
+
+// ————— J. Advanced Parameters
+_8 =            input(true, "═════════════ Advanced Parameters")
+atr_th =        input(AT, title="ATR Thresold")
+
+// Ichimoku MTF
+ts_bars =       input(9, minval=1, title="Tenkan-Sen")
+ks_bars =       input(26, minval=1, title="Kijun-Sen")
+ss_offset =     input(26, minval=1, title="Senkou-Span A")
+ssb_bars =      input(52, minval=1, title="Senkou-Span B")
+cs_offset =     input(26, minval=1, title="Chikou-Span")
+
+// ADX
+adxlen =        input(14, title="ADX Smoothing")
+dilen =         input(14, title="DI Length")
+
+// Bollinger Bands
+bb_mult =       input(BBM, minval=0.001, maxval=50, step=0.1, title="Bollinger Bands StdDev")
+bb_len =        input(20, minval=1, title="Bollinger Bands Length")
+bb_src =        input(close, title="Bollinger Bands Source")
+
+// ATR
+atr_len =       input(14, minval=1, title="ATR Length")
+atr_smooth =    input(MA1, "ATR MA Smoothing", options=[MA1, MA2, MA3, MA4])
+
+
+// Momentum
+mom_len =       input(12, title="Momentum Length")
+mom_src =       input(close, title="Momentum Source")
+
+// Support / Resistance
+sr_line_width = 4 // input(4, type = input.integer, title="SR Level line Width")
+sr_lvl_min_len = input(5, type = input.integer, title="Minimum of bars to qualify a level")
+sr_y  = "Orange" // input("Orange", "Line Color", options=["Red", "Lime", "Orange", "Teal", "Yellow", "White", "Black"])
+sr_line_extend = false ? extend.right : extend.none
+// input(false, type = input.bool, title = "Extend Level line Right")
+
+// Zignaly KEY
+zignaly_key = input(ZK0, title="Zignaly KEY")
+zignaly_lev = input(20, title="Leverage")
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// —————————————————————————————————————— 1. Variable Initializations —————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// We declare global and trade vars and propagate values for those that need it.
+// Vars holding global stats for all trades are divided in 4 groups: Combined (First and pyramided entries), First entries, Pyramided entries and PEA (Post-Exit Analysis).
+// They start with All_, First_, Pyr_ or PEA_ respectively.
+// So-called local vars hold data relating to one trade at a time. They use the same prefix, without an underscore.
+//
+// We deal with 4 different units in the code:
+//  1.  Quote currency (quote), i.e. the price on the chart.
+//  2.  X (X): the stop's amplitude,
+//  3.  Currency (curr): the currency of the Initial Capital.
+//  4.  % of Initial Capital (equ): a % representing a fraction of Initial Capital.
+// ———————————————————— A. Global data.
+// ————— Global stats (1st and pyramided entries)
+// All entries.
+var All_Entries = 0
+// // All fees paid (equ).
+// All_FeesEqu = 0.0, All_FeesEqu := nz(All_FeesEqu[1])
+// // Sum and avg of PLX (P&L expressed as mult of X).
+// All_PLXTot = 0.0, All_PLXTot := nz(All_PLXTot[1])
+// All_PLXAvg = 0.0, All_PLXAvg := nz(All_PLXAvg[1])
+// // Total of all Entry position sizes (equ).
+// All_PositionInTot = 0.0, All_PositionInTot := nz(All_PositionInTot[1])
+// // Profit factor.
+// All_ProfitFactor = 0.0, All_ProfitFactor := nz(All_ProfitFactor[1])
+// // All slippage paid (equ).
+// All_SlipEqu = 0.0, All_SlipEqu := nz(All_SlipEqu[1])
+// // Sum and avg of trade lengths.
+// All_TradeLengthsTot = 0.0, All_TradeLengthsTot := nz(All_TradeLengthsTot[1])
+// All_TradeLengthsAvg = 0.0, All_TradeLengthsAvg := nz(All_TradeLengthsAvg[1])
+// // All currency volume traded (both entries and exits counted).
+// All_VolumeTraded = 0.0, All_VolumeTraded := nz(All_VolumeTraded[1])
+// // Sum of all winning/losing trades.
+// All_Winning = 0, All_Winning := nz(All_Winning[1])
+// All_Losing = 0, All_Losing := nz(All_Losing[1])
+// // Sum of winning/losing trade lengths.
+// All_WinsTL = 0.0, All_WinsTL := nz(All_WinsTL[1])
+// All_LoseTL = 0.0, All_LoseTL := nz(All_LoseTL[1])
+// // P&L total (X) of all winning/losing trades.
+// All_WinsX = 0.0, All_WinsX := nz(All_WinsX[1])
+// All_LoseX = 0.0, All_LoseX := nz(All_LoseX[1])
+// // P&L total (equ) of all winning/losing trades.
+// All_WinsEqu = 0.0, All_WinsEqu := nz(All_WinsEqu[1])
+// All_LoseEqu = 0.0, All_LoseEqu := nz(All_LoseEqu[1])
+// // Sum and avg of all stops (quote).
+// All_XTot = 0.0, All_XTot := nz(All_XTot[1])
+// All_XAvg = 0.0, All_XAvg := nz(All_XAvg[1])
+// // Sum and avg of all stops (equ).
+// All_XEquTot = 0.0, All_XEquTot := nz(All_XEquTot[1])
+// All_XEquAvg = 0.0, All_XEquAvg := nz(All_XEquAvg[1])
+// // Sum and avg of all stops as percentage of fill.
+// All_XPctTot = 0.0, All_XPctTot := nz(All_XPctTot[1])
+// All_XPctAvg = 0.0, All_XPctAvg := nz(All_XPctAvg[1])
+
+// ————— Risk/Equity management.
+// Starting Equity in the script is represented as value 1.0. It is converted at display time in units of currency
+// corresponding to whatever the user thinks he's using in the "Initial Capital" field.
+// Equity = Initial Capital + P&L. If equity reaches 0.0, ruin occurs and no more trades are entered.
+var Equity = InitCapital
+// Current ROI.
+var ReturnOnEquity = 0.0
+// True if ruin occurs.
+var Ruin = false
+
+// ————— Close to close max drawdown (only measured from trade close to trade close).
+// Max and min close to close equity points, and end of trade max drawdown reached. Reset min when new high encountered.
+// CToCEquityMax = 0.0
+// CToCEquityMin = 0.0
+// CToCDrawdown = 0.0
+// // Max close to close drawdown in equity.
+// CToCMaxDrawdown = 0.0, CToCMaxDrawdown := nz(CToCMaxDrawdown[1])
+
+// ————— Max drawdown (measured at every in-trade bar).
+// This max drawdown calc needs to maintain separate max and min equity points.
+// We are re-evaluating the max and min at each in-trade bar.
+// All-time in-trade equity high and min. Min resets when new high encountered.
+var EquityMin = 0.0, EquityMin := nz(EquityMin[1])
+var EquityMax = 0.0, EquityMax := nz(EquityMax[1])
+Drawdown = 0.0
+// Max drawdown in equity.
+var MaxDrawdown = 0.0, MaxDrawdown := nz(MaxDrawdown[1])
+// Equity update in-trade to provide full equity max drawdown instead of close to close drawdown.
+var InTradeEquity = 0.0, InTradeEquity := nz(InTradeEquity[1])
+var InTradeStartEquity = 0.0, InTradeStartEquity := nz(InTradeStartEquity[1])
+
+// ———————————————————— B. Local data.
+// "Local" refers to data that is maintained while a trade is open or a PEA is ongoing.
+// ————— Trade management.
+// Entry level (open of bar following trigger).
+var EntryOrder = 0.0, EntryOrder := EntryOrder[1]
+// Entry price after slippage.
+// EntryFill = 0.0, EntryFill := EntryFill[1]
+// // Stop level at Entry.
+var EntryStop = 0.0, EntryStop := EntryStop[1]
+// // Entry stop amplitude in quote, from fill to stop (so includes slippage).
+var EntryX = 0.0
+// // Entry stop as % of entry fill.
+var EntryXPct = 0.0
+// // Entry stop (equ).
+var EntryXEqu = 0.0
+// // Exit level (order).
+var ExitOrder = 0.0
+// // Exit fill after slippage.
+// ExitFill = 0.0, ExitFill := ExitFill[1]
+// // Fees paid on entry (equ).
+var FeesPaidIn = 0.0
+// // Fees paid on exit (equ).
+var FeesPaidOut = 0.0
+// // Holds last issued entry signal: + for longs, - for shorts.
+// LastEntryNumber = 0, LastEntryNumber := LastEntryNumber[1]
+// // Last entry's price level, whether it was a normal or pyramided entry.
+// LastEntryPrice = 0.0, LastEntryPrice := LastEntryPrice[1]
+// // Position size at entry (equ).
+var PositionIn = 0.0
+// // Position size at exit (equ).
+var PositionOut = 0.0
+// // Slippage incurred on entry (quote).
+// SlipPaidIn = 0.0, SlipPaidIn := SlipPaidIn[1]
+// // Slippage incurred on exit (quote).
+// SlipPaidOut = 0.0, SlipPaidOut := SlipPaidOut[1]
+// // Total trade slippage (equ).
+// SlippageEqu = 0.0, SlippageEqu := SlippageEqu[1]
+// // Take Profit Target
+var EntryTakeProfit = 0.0
+// // Trailing Take Profit Target
+var TrailingTakeProfitLong = 0.0
+var TrailingTakeProfitShort = 0.0
+// // Target level for hard exits.
+var TakeProfitLevel = 0.0
+// // Trade length in bars.
+var TradeLength = 0
+// // Max in-trade drawdown.
+var TradeMaxDrawdown = 0.0
+
+var InTradeStop = 0.0       // Last valid in-trade stop (we always use previous bar's stop for comparison to price, so must be used indexed).
+var MaxReached = 0.0        // Max high/low reached since beginning of trade.
+var MinReached = 0.0        // Min high/low reached since beginning of trade.
+var TradeDrawdown = 0.0     // Discrete drawdown at each bar in trade's history, to be used to determine trade max drawdown.
+var TradePLX = 0.0          // Trade PL (X), after slippage.
+var TradePLXMax = 0.0       // Highest PL (X) reached during trade.
+var TradePLXMin = 0.0       // Lowest PL (X) reached during trade.
+var TradePLPct = 0.0       // Trade PL (%) after slippage.
+var TradePLEqu = 0.0        // Net trade PL (equ), i.e. including slippage AND fees.
+
+
+// ———————————————————— C. State and misc vars.
+// These variables get updated after triggers and during trades.
+// They do not require propagation because they are derived from the state of other propagated information or previous states.
+var EntryTrigger = false            // True when an entry trigger is detected.
+var ExitTrigger = false             // True when an exit trigger is detected
+var PyramidEntry = false            // True when a long/short pyramid entry occurs.
+var InTrade = false, InTrade := InTrade[1]                 // True when in InLong or InShort is true.
+var ExitCondition = false           // True when stop breached, take profit or target level reached.
+var EntryLong = false
+var EntryShort = false
+var ExitLong = false
+var ExitShort = false
+var ExitLongTrigger = false
+var ExitShortTrigger = false
+// ————— Longs
+var LongEntryTrigger = false        // Becomes true on the bar when entry order is to be issued; false otherwise.
+var InLong = false, InLong := InLong[1]                 // True from bar after entry trigger to bar of exit trigger, inclusively.
+// ————— Shorts
+var ShortEntryTrigger = false       // Becomes true on the bar when entry order is to be issued; false otherwise.
+var InShort = false, InShort := InShort[1]                 // True from bar after entry trigger to bar of exit trigger, inclusively.
+// ————— Take Profit
+var InTrailingTP = false            // Becomes true when trade enter in Trailing Take Profit
+var TrailEntryTPLongTrigger = false     // Becomes true when price trigger trailing stop
+var TrailEntryTPShortTrigger = false
+var EntryStopLongTrigger = false
+var EntryStopShortTrigger = false
+var EntryTPLongTrigger = false
+var EntryTPShortTrigger = false
+var EntryStopLong = 0.0
+var EntryStopShort = 0.0
+var EntryTakeProfitLong = 0.0
+var EntryTakeProfitShort = 0.0
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// —————————————————————————————————————— 2. Indicators and Functions —————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// This module contains indicators typically used by more than one strat or that contain too much code to be included
+// in the module where it is used without distracting from the rest.
+//
+// ——————————————— Function f_secureSecurity
+// to securely and simply call `security()` so that it never repaints and never looks ahead.
+f_secureSecurity(_symbol, _res, _src) => security(_symbol, _res, _src[1], lookahead = barmerge.lookahead_on)
+
+
+// ———————————————————— Function used to increment counters by 1 using boolean criterion.
+f_OneZero( _test) => 
+    _return = _test? 1:0
+
+
+// ———————————————————— Function used to round values.
+f_Round( _val, _decimals) => 
+    // Rounds _val to _decimals places.
+    _p = pow(10,_decimals)
+    round(abs(_val)*_p)/_p*sign(_val)
+
+
+// ———————————————————— Function used to round prices to tick size everywhere we calculate prices.`
+// In places where it is not used, most of the time it's because it isn't relevant or because value will be rounded further down the logic line.
+f_RoundToTick( _price) => round(_price/syminfo.mintick)*syminfo.mintick
+
+
+// ———————————————————— OHLC rounded to mintick
+//(used to standardize values across test as mintick sometimes varies during dataset).
+// Although situated in this module, are used all over the script.
+var Ropen   = f_RoundToTick(open)
+var Rhigh   = f_RoundToTick(high)
+var Rlow    = f_RoundToTick(low)
+var Rclose  = f_RoundToTick(close)
+// ————— Lowest/highest of open/close
+var MinOC = min(open,close)
+var MaxOC = max(open,close)
+
+
+// ——————————————— Ichimoku MTF for current timeframe
+tenkan = avg(lowest(ts_bars), highest(ts_bars))
+kijun = avg(lowest(ks_bars), highest(ks_bars))
+senkouA = avg(tenkan, kijun)
+senkouB = avg(lowest(ssb_bars), highest(ssb_bars))
+ss_high = max(senkouA[ss_offset - 1], senkouB[ss_offset - 1])
+ss_low = min(senkouA[ss_offset - 1], senkouB[ss_offset - 1])
+
+
+// ——————————————— Ichimoku MTF for trend detection timeframe
+tk = f_secureSecurity(syminfo.tickerid, trend_res, tenkan)
+kj = f_secureSecurity(syminfo.tickerid, trend_res, kijun)
+ssa = f_secureSecurity(syminfo.tickerid, trend_res, senkouA)
+ssb = f_secureSecurity(syminfo.tickerid, trend_res, senkouB)
+ssh = max(ssa[ss_offset - 1], ssb[ss_offset - 1])
+ssl = min(ssa[ss_offset - 1], ssb[ss_offset - 1])
+
+
+// ——————————————— Ichimoku MTF for entrys detection timeframe
+// tk_ltf = f_secureSecurity(syminfo.tickerid, entry_res, tenkan)
+// kj_ltf = f_secureSecurity(syminfo.tickerid, entry_res, kijun)
+// ssa_ltf = f_secureSecurity(syminfo.tickerid, entry_res, senkouA)
+// ssb_ltf = f_secureSecurity(syminfo.tickerid, entry_res, senkouB)
+// ssh_ltf = max(ssa[ss_offset - 1], ssb[ss_offset - 1])
+// ssl_ltf = min(ssa[ss_offset - 1], ssb[ss_offset - 1])
+
+
+// ——————————————— Ichimoku MTF for exits detection timeframe
+// tk_ex = f_secureSecurity(syminfo.tickerid, exit_res, tenkan)
+// kj_ex = f_secureSecurity(syminfo.tickerid, exit_res, kijun)
+// ssa_ex = f_secureSecurity(syminfo.tickerid, exit_res, senkouA)
+// ssb_ex = f_secureSecurity(syminfo.tickerid, exit_res, senkouB)
+// ssh_ex = max(ssa[ss_offset - 1], ssb[ss_offset - 1])
+// ssl_ex = min(ssa[ss_offset - 1], ssb[ss_offset - 1])
+
+
+// ——————————————— Simple MA
+sma_out = sma(ma_src, ma_len)
+sma_out_htf = f_secureSecurity(syminfo.tickerid, trend_res, sma(ma_src, ma_len_htf))
+
+
+// ——————————————— Exponential MA
+ema_out = ema(ma_src, ma_len)
+ema_out_htf = f_secureSecurity(syminfo.tickerid, trend_res, ema(ma_src, ma_len_htf))
+
+
+// ——————————————— Weighted MA
+wma_out = wma(ma_src, ma_len)
+wma_out_htf = f_secureSecurity(syminfo.tickerid, trend_res, wma(ma_src, ma_len_htf))
+
+
+// ——————————————— Hull MA
+hullma = wma(2*wma(ma_src, ma_len/2)-wma(ma_src, ma_len), round(sqrt(ma_len)))
+hullma_htf = f_secureSecurity(syminfo.tickerid, trend_res, wma(2*wma(ma_src, ma_len_htf/2)-wma(ma_src, ma_len_htf), round(sqrt(ma_len_htf))))
+    
+    
+// ——————————————— ADX Range detector
+f_dirmov_1(_len) =>
+    _up =    change(high)
+    _down = -change(low)
+    _plusDM = na(_up) ? na : _up > _down and _up > 0 ? _up : 0
+    _minusDM = na(_down) ? na : _down > _up and _down > 0 ? _down : 0
+    _truerange = rma(tr, _len)
+    _plus = fixnan(100 * rma(_plusDM, _len) / _truerange)
+    _minus = fixnan(100 * rma(_minusDM, _len) / _truerange)
+    [_plus, _minus]
+f_dirmov_2(_len) =>
+    _up = change(high)
+    _down = -change(low)
+    _plusDM = na(_up) ? na : _up > _down and _up > 0 ? _up : 0
+    _minusDM = na(_down) ? na : _down > _up and _down > 0 ? _down : 0
+    _truerange = rma(tr, _len)
+    _plus = fixnan(100 * rma(_plusDM, _len) / _truerange)
+    _minus = fixnan(100 * rma(_minusDM, _len) / _truerange)
+    [_plus, _minus]
+f_adx(_dilen, _adxlen) =>
+    [_plus, _minus] = f_dirmov_1(_dilen)
+    _sum = _plus + _minus
+    _adx = 100 * rma(abs(_plus - _minus) / (_sum == 0 ? 1 : _sum), _adxlen)
+    _adx
+f_adx2(_dilen, _adxlen) =>
+    [_plus, _minus] = f_dirmov_2(_dilen)
+    _sum = _plus + _minus
+    _adx = 100 * rma(abs(_plus - _minus) / (_sum == 0 ? 1 : _sum), _adxlen)
+    _security_1 = f_secureSecurity(syminfo.tickerid, adx_res, _adx[1])
+    _adx2 = _security_1
+    _adx2
+sig = f_adx2(dilen, adxlen)
+
+
+// ——————————————— Bollinger Bands
+bb_basis = sma(bb_src, bb_len)
+bb_dev = bb_mult * stdev(bb_src, bb_len)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+
+
+// ——————————————— ATR
+f_atr_smooth(_source, _len) =>
+	if atr_smooth == MA1
+		rma(_source, _len)
+	else
+		if atr_smooth == MA2
+			sma(_source, _len)
+		else
+			if atr_smooth == MA3
+				ema(_source, _len)
+			else
+				wma(_source, _len)
+
+atr = f_atr_smooth(tr(true), atr_len)
+atrper = (atr / close) * 100
+
+
+// ——————————————— Momentum
+f_momentum(_seria, _mom_len) =>
+	_mom = _seria - _seria[_mom_len]
+	_mom
+
+mom0 = f_momentum(mom_src, mom_len)
+mom1 = f_momentum(mom0, 1)
+// mom0_ltf = f_secureSecurity(syminfo.tickerid, entry_res, mom0)
+// mom1_ltf = f_momentum(mom0_ltf, 1)
+mom0_htf = f_secureSecurity(syminfo.tickerid, trend_res, mom0)
+mom1_htf = f_momentum(mom0_htf, 1)
+// mom0_ex = f_secureSecurity(syminfo.tickerid, exit_res, mom0)
+// mom1_ex = f_momentum(mom0_ex, 1)
+
+
+// ——————————————— Support / Resistance
+// ————— A. color function
+sr_colour(z) => z=="Red"?color.red:z=="Lime"?color.lime:z=="Orange"?color.orange:z=="Teal"?
+ color.teal:z=="Yellow"?color.yellow:z=="Black"?color.black:color.white
+ 
+//Legacy RSI calc
+sr_rsi_src = close, sr_len = 9
+sr_up1 = rma(max(change(sr_rsi_src), 0), sr_len)
+sr_down1 = rma(-min(change(sr_rsi_src), 0), sr_len)
+sr_legacy_rsi = sr_down1 == 0 ? 100 : sr_up1 == 0 ? 0 : 100 - (100 / (1 + sr_up1 / sr_down1))
+
+// ————— B. CMO based on HMA
+sr_length = 1
+src1 = hma(open, 5)[1] // legacy hma(5) calculation gives a resul with one candel shift, thus use hma()[1]
+src2 = hma(close, 12)
+sr_momm1 = change(src1)
+sr_momm2 = change(src2)
+f_sr1(_m, _n) => _m >= _n ? _m : 0.0
+f_sr2(_m, _n) => _m >= _n ? 0.0 : -_m
+sr_m1 = f_sr1(sr_momm1, sr_momm2)
+sr_m2 = f_sr2(sr_momm1, sr_momm2)
+sr_sm1 = sum(sr_m1, sr_length)
+sr_sm2 = sum(sr_m2, sr_length)
+f_sr_percent(_nom, _div) => 100 * _nom / _div
+sr_cmo_new = f_sr_percent(sr_sm1-sr_sm2, sr_sm1+sr_sm2)
+
+// ————— C. Legacy Close Pivots calcs.
+sr_len5 = 2
+sr_h = highest(sr_len5)
+sr_h1 = dev(sr_h, sr_len5) ? na : sr_h
+sr_hpivot = fixnan(sr_h1)
+sr_l = lowest(sr_len5)
+sr_l1 = dev(sr_l, sr_len5) ? na : sr_l
+sr_lpivot = fixnan(sr_l1)
+
+// ————— D. Calc Values
+sr_rsi_new = rsi(close,9)
+sr_lpivot_new =  sr_lpivot  // use legacy pivots calculation as integrated pivotlow/pivothigh functions give very different result
+sr_hpivot_new =  sr_hpivot
+sr_sup = sr_rsi_new < 25 and sr_cmo_new > 50  and sr_lpivot_new
+sr_res = sr_rsi_new > 75 and sr_cmo_new < -50  and sr_hpivot_new
+f_sr_calcXup() =>
+    var _xup = 0.0
+    _xup :=  sr_sup ? low : _xup[1]
+f_sr_calcXdown() =>
+    var _xdown = 0.0
+    _xdown := sr_res ? high : _xdown[1]
+
+// ————— E. Lines drawing variables
+sr_tf1 = f_sr_calcXup() // Supports
+sr_tf2  = f_sr_calcXdown() // Resistances
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————— 3. Filters ———————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Trend detection
+// ————— A. Ichimoku MTF for current timeframe
+tk_cross_bull = tenkan > kijun
+tk_cross_bear = tenkan < kijun
+kumo_bull = senkouA > senkouB
+kumo_bear = senkouA < senkouB
+price_above_kumo = close > ss_high
+price_below_kumo = close < ss_low
+ichi_bull = tk_cross_bull and kumo_bull and price_above_kumo
+ichi_bear = tk_cross_bear and kumo_bear and price_below_kumo
+
+// ————— B. Trend detection by MA
+ma_bull = close > sma_out
+ma_bear = close < sma_out
+
+// ————— C. Trend detection by EMA
+ema_bull = close > ema_out
+ema_bear = close < ema_out
+
+// ————— D. Trend detection by WMA
+wma_bull = close > wma_out
+wma_bear = close < wma_out
+
+// ————— E. Trend detection by Hull MA
+hma_bull = close > hullma
+hma_bear = close < hullma
+
+// ————— F. Trend Detection by Momentum
+momBull = mom0 > 0 and mom1 > 0
+momBear = mom0 < 0 and mom1 < 0
+
+
+// ——————————————— Trend detection Higher timeframe
+// ————— A. Trend Detection Timeframe close and open
+trend_res_open = f_secureSecurity(syminfo.tickerid, trend_res, open)
+trend_res_close = f_secureSecurity(syminfo.tickerid, trend_res, close)
+
+// ————— B. Ichimoku MTF for trend detection timeframe
+tkxbull = tk > kj
+tkxbear = tk < kj
+kbull = ssa > ssb
+kbear = ssa < ssb
+price_a_kumo = trend_res_close > ssh
+price_b_kumo = trend_res_close < ssl
+ichi_bull_htf = tkxbull and kbull and price_a_kumo
+ichi_bear_htf = tkxbear and kbear and price_b_kumo
+
+// ————— C. Trend detection Higher TF by MA
+ma_bull_htf = trend_res_close > sma_out_htf
+ma_bear_htf = trend_res_close < sma_out_htf
+
+// ————— D. Trend detection Higher TF by EMA
+ema_bull_htf = trend_res_close > ema_out_htf
+ema_bear_htf = trend_res_close < ema_out_htf
+
+// ————— E. Trend detection Higher TF by WMA
+wma_bull_htf = trend_res_close > wma_out_htf
+wma_bear_htf = trend_res_close < wma_out_htf
+
+// ————— F. Trend detection Higher TF by Hull MA
+hma_bull_htf = trend_res_close > hullma_htf
+hma_bear_htf = trend_res_close < hullma_htf
+
+// ————— G. Trend Detection Higher TF by Momentum
+momBull_htf = mom0_htf > 0 and mom1_htf > 0
+momBear_htf = mom0_htf < 0 and mom1_htf < 0
+
+// ——————————————— Returns
+// ————— A. Plot
+trend_plot = trend == TR1 ? na : trend == TR2 ? sma_out : trend == TR3 ? ema_out : trend == TR4 ? wma_out : trend == TR5 ? hullma : na
+
+// ————— B. Trend Detection
+bull = trend == TR0 ? true : trend == TR1 ? ichi_bull : trend == TR2 ? ma_bull : trend == TR3 ? ema_bull : trend == TR4 ? wma_bull : trend == TR5 ? hma_bull : trend == TR6 ? momBull : true
+bear = trend == TR0 ? true : trend == TR1 ? ichi_bear : trend == TR2 ? ma_bear : trend == TR3 ? ema_bear : trend == TR4 ? wma_bear : trend == TR5 ? hma_bear : trend == TR6 ? momBear : true
+
+// ————— C. Plot Higher TF
+trend_plot_htf = trend_htf == HT1 ? na : trend_htf == HT2 ? sma_out_htf : trend_htf == HT3 ? ema_out_htf : trend_htf == HT4 ? wma_out_htf : trend_htf == HT5 ? hullma_htf : na
+
+// ————— D. Trend Detection Higher TF
+bull_htf = trend_htf == HT0 ? true : trend_htf == HT1 ? ichi_bull_htf : trend == HT2 ? ma_bull_htf : trend == HT3 ? ema_bull_htf : trend == HT4 ? wma_bull_htf : trend == HT5 ? hma_bull_htf : true
+bear_htf = trend_htf == HT0 ? true : trend_htf == HT1 ? ichi_bear_htf : trend == HT2 ? ma_bear_htf : trend == HT3 ? ema_bear_htf : trend == HT4 ? wma_bear_htf : trend == HT5 ? hma_bear_htf : true
+
+// ————— E. Range detection Higher TF
+rangefalse = seuil < sig
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————————— 4. Entry Stops & Take Profit————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Stop Loss
+// ————— Support / Resistance Cross -> SL1
+srEntryStopLong = sr_tf1[1]
+srEntryStopShort = sr_tf2[1]
+srEntryStopLongTrigger = close < srEntryStopLong
+srEntryStopShortTrigger = close > srEntryStopShort
+
+
+// ————— Fixed Value -> SL2
+maxLossPer = 1 - ((InitPosition - sl_value)/InitPosition)
+fvEntryStopLong = EntryOrder - (EntryOrder*maxLossPer)
+fvEntryStopShort = EntryOrder + (EntryOrder*maxLossPer)
+fvEntryStopLongTrigger = close < fvEntryStopLong
+fvEntryStopShortTrigger = close > fvEntryStopShort
+
+
+// ————— % Loss on Total Equity -> SL3
+perEntryStopLong = EntryOrder - (EntryOrder * (sl_per/100)) 
+perEntryStopShort = EntryOrder + (EntryOrder * (sl_per/100))
+perEntryStopLongTrigger = close < perEntryStopLong
+perEntryStopShortTrigger = close > perEntryStopShort
+
+
+// ——————————————— Take Profit
+// ————— Fixed Value -> TP1
+minGainPer = ((InitPosition + tp_value)/InitPosition) - 1
+fvEntryTPLong = EntryOrder + (EntryOrder*minGainPer)
+fvEntryTPShort = EntryOrder - (EntryOrder*minGainPer)
+fvEntryTPLongTrigger = close > fvEntryTPLong
+fvEntryTPShortTrigger = close < fvEntryTPShort
+
+
+// ————— % Gains -> TP2
+perEntryTPLong = EntryOrder + (EntryOrder * (tp_per/100))
+perEntryTPShort = EntryOrder - (EntryOrder * (tp_per/100))
+perEntryTPLongTrigger = close > perEntryTPLong
+perEntryTPShortTrigger = close < perEntryTPShort
+perEntryTPTrigger = perEntryTPLongTrigger or perEntryTPShortTrigger
+
+
+// ——————————————— Returns
+// Exit Order Value
+EntryStopLong := stoploss == SL1 ? srEntryStopLong : stoploss == SL2 ? fvEntryStopLong : stoploss == SL3 ? perEntryStopLong : 0
+EntryStopShort := stoploss == SL1 ? srEntryStopShort : stoploss == SL2 ? fvEntryStopShort : stoploss == SL3 ? perEntryStopShort : 0
+EntryStop := InLong ? EntryStopLong : InShort ? EntryStopShort : 0
+
+EntryTakeProfitLong := takeprofit == TP1 ? fvEntryTPLong : takeprofit == TP2 ? perEntryTPLong : 0
+EntryTakeProfitShort := takeprofit == TP1 ? fvEntryTPShort : takeprofit == TP2 ? perEntryTPShort : 0
+EntryTakeProfit := InLong ? EntryTakeProfitLong : InShort ? EntryTakeProfitShort : 0
+
+// Exit Order Trigger
+EntryStopLongTrigger := InLong and stoploss == SL1 ? srEntryStopLongTrigger : InLong and stoploss == SL2 ? fvEntryStopLongTrigger : InLong and stoploss == SL3 ? perEntryStopLongTrigger : false
+EntryStopShortTrigger := InShort and stoploss == SL1 ? srEntryStopShortTrigger : InShort and stoploss == SL2 ? fvEntryStopShortTrigger : InShort and stoploss == SL3 ? perEntryStopShortTrigger : false
+EntryTPLongTrigger := InLong and takeprofit == TP1 ? fvEntryTPLongTrigger : InLong and takeprofit == TP2 ? perEntryTPLongTrigger : false
+EntryTPShortTrigger := InShort and takeprofit == TP1 ? fvEntryTPShortTrigger : InShort and takeprofit == TP2 ? perEntryTPShortTrigger : false
+
+// Plot
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————— 5. Entries ———————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Entrys Detection Timeframe close and open
+// entry_res_open = f_secureSecurity(syminfo.tickerid, entry_res, open)
+// entry_res_close = f_secureSecurity(syminfo.tickerid, entry_res, close)
+
+
+// ——————————————— Ichimoku MTF for entrys detection timeframe
+// tkxbull_ltf = tk_ltf > kj_ltf
+// tkxbear_ltf = tk_ltf < kj_ltf
+// kbull_ltf = ssa_ltf > ssb_ltf
+// kbear_ltf = ssa_ltf < ssb_ltf
+// csxbull_ltf = mom(entry_res_close, cs_offset - 1) > 0
+// csxbear_ltf = mom(entry_res_close, cs_offset - 1) < 0
+// price_a_kumo_ltf = entry_res_close > ss_high
+// price_b_kumo_ltf = entry_res_close < ss_low
+// kijun_long_ltf = entry_res_open + entry_res_open / 10000 < kijun and entry_res_close - entry_res_close / 10000 > kijun
+// kijun_short_ltf = entry_res_open > kijun and entry_res_close < kijun
+// bullish_ltf = tkxbull_ltf and kbull_ltf and price_a_kumo_ltf
+// bearish_ltf = tkxbear_ltf and kbear_ltf and price_b_kumo_ltf
+// ichiLong = kijun_long_ltf
+// ichiShort = kijun_short_ltf
+
+
+// ——————————————— Ichimoku MTF for current timeframe
+// tk_cross_bull = tenkan > kijun
+// tk_cross_bear = tenkan < kijun
+// kumo_bull = senkouA > senkouB
+// kumo_bear = senkouA < senkouB
+cs_cross_bull = mom(close, cs_offset - 1) > 0
+cs_cross_bear = mom(close, cs_offset - 1) < 0
+// price_above_kumo = close > ss_high
+// price_below_kumo = close < ss_low
+kijun_break_long = open < kijun and close - (high - low)*0.2 > kijun
+kijun_break_short = open > kijun and close - (high - low)*0.2 < kijun
+bullish = tk_cross_bull and kumo_bull and price_above_kumo
+bearish = tk_cross_bear and kumo_bear and price_below_kumo
+ichiLong = kijun_break_long
+ichiShort = kijun_break_short
+
+
+// ——————————————— Support / Resistance breakout entry
+srLong = close > sr_tf2[1] and volume > (volume[1] + volume[1] * 0.1)
+srShort = close < sr_tf1[1] and volume > (volume[1] + volume[1] * 0.1)
+
+
+// ——————————————— Bollinger Bands + ATR Entry
+// entry_res_bbsrc = f_secureSecurity(syminfo.tickerid, entry_res, bb_src)
+bbLong = (close + (high - low)*0.2) > bb_upper and atr < atr_th
+bbShort = (close - ((high - low)*0.2)) < bb_lower and atr < atr_th
+ //and atrper < 0.8
+
+// ——————————————— Momentum LTF Entry
+momLong = mom0 > 0 and mom1 > 0
+momShort = mom0 < 0 and mom1 < 0
+
+
+// ——————————————— Returns
+EntryLong := entrys == EN1 ? ichiLong : entrys == EN2 ? srLong : entrys == EN3 ? bbLong : entrys == EN4 ? momLong : false
+EntryShort := entrys == EN1 ? ichiShort : entrys == EN2 ? srShort : entrys == EN3 ? bbShort : entrys == EN4 ? momShort : false
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————— 6. Trade Entry and In-trade Processing ———————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// Here we:
+//  A. Process 1st entries.
+//  B. Process pyramided entries.
+//  C. Update in-trade numbers for display purposes.
+
+// ———————————————————— Trade state management
+// ————— Determine if we have entered a trade and propagate state until we exit.
+InLong := LongEntryTrigger[1] or (InLong[1] and not ExitLongTrigger[1])
+InShort := ShortEntryTrigger[1] or (InShort[1] and not ExitShortTrigger[1])
+// ————— Merge states for ease of logical testing.
+InTrade := InLong or InShort
+
+
+if EntryTrigger[1]
+    // EntryOrder fixed to open price
+    EntryOrder := open
+    // Begin counting trade length
+    TradeLength := 1
+    // Reset max and min point reached during trade.
+    MaxReached := InLong ? high:low
+    MinReached := InLong ? low:high
+    // Initialized upon entry and constant throughout trade, InTradeStop will usually take over in further trade management.
+    EntryStop := InLong ? EntryStopLong : EntryStopShort
+    // ————— Calculate X upon entry.
+    // This amplitude in quote currency is the fundamental unit of risk for the trade, which we call X.
+    // We also keep a version of it expressed as a % of the entry fill, and another in equ. Notice that entry slippage affects the size of X.
+    EntryX := abs(EntryOrder-EntryStop)
+    EntryXPct := EntryX/EntryOrder
+    // PositionIn size is determined according to user selection: Type 1 for relative pos size and fixed risk. Type 2 for fixed % of Equity. Type 3 for fixed % of initial capital.
+    // PositionIn := min(Equity, PosType1? min(Equity*PosType1Cap/100, Equity*PosType1Risk/100/EntryXPct) : PosType2? Equity*PosType2Pct/100 : PosType3Pct/100)
+    // % Fees are calculated on the PositionIn size. Fixed fees are in equ. Either way they end up being expressed in equ and will only later be deducted from trade's PL and Equity.
+    // FeesPaidIn := (FeesType2? PositionIn*FeesType2InPct/100 : FeesType3? FeesType3In : 0.0)
+    // X (equ).
+    // EntryXEqu := PositionIn*EntryXPct
+    ExitOrder := 0.0
+    TakeProfitLevel := na
+    TradePLX := 0.0
+    TradePLPct := 0.0
+    TradePLEqu := 0.0
+    TradePLXMax := 0.0
+    TradePLXMin := 0.0
+    FeesPaidOut := 0.0
+    TradeMaxDrawdown := 0.0
+    All_Entries := All_Entries + 1
+
+
+if InTrade
+    // ————— Update essential in-trade info.
+    // Increase trade length.
+    TradeLength := TradeLength+1
+    // Update Max point reached during trade (used both for trailing stop reference point and in-trade max drawdown calcs).
+    MaxReached := InLong and open > MaxReached ? high : InShort and open < MaxReached ? low : MaxReached
+    
+    // ————— Update in-trade max drawdown info (has nothing to do with max drawdown calcs later in this section).
+    // Since we only use the Min point to calculate in-trade max drawdown, reset it when a new max is found.
+    MinReached := InLong and open < MinReached? low : InShort and open > MinReached ? high : MinReached
+    // Record current drawdown to build history of all drawdowns during trade.
+    TradeDrawdown := min(0.0,(MaxReached-MinReached)*(InLong[1]?-1:1)/MaxReached)
+    // Find largest drawdown during trade.
+    TradeMaxDrawdown := min(TradeMaxDrawdown, TradeDrawdown)
+    
+    // ————— Simulate a complete exit from close here to display provisional trade info.
+    // In this "display only mode" during trade, fees paid in or out are ignored. They will only be included in results at real exit.
+    ExitOrder := open
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————————— 6. In-trade stops & Take Profit ————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// We work in 2 steps: first we calculate the stop for each strat,
+// then we evaluate the kick in conditions that will determine if the stop we have calculated will be used.
+// In all cases a new stop will only replace a previous one if it closer to price, so this logic does not
+// currently allow implementing stop strats where the stop moves against price. They won't cause errors; the
+// stop will just never go further away from price than the previous one.
+// ————— Trailing at % -> TP3
+InTrailingTP := InTrade and perEntryTPTrigger[1] and takeprofit==TP3 or InTrade and InTrailingTP[1] and takeprofit==TP3
+TrailingTakeProfitLong := perEntryTPLong
+TrailingTakeProfitShort := perEntryTPLong
+// TrailingTakeProfit := InLong and (close - (EntryOrder * (tp_trail/100))) > TrailingTakeProfit[1] ? close - (EntryOrder * (tp_trail/100)) : InShort and (close + (EntryOrder * (tp_trail/100))) < TrailingTakeProfit[1] ? close + (EntryOrder * (tp_trail/100)) : InTrade ? TrailingTakeProfit[1] : 0
+
+// ————— Trailing stop using fixed percentage as max deviation -> TP3
+if InTrailingTP
+    TrailingTakeProfitLong := MaxReached * (1-tp_trail/100)
+    TrailingTakeProfitShort := MaxReached * (1+tp_trail/100)
+    TrailEntryTPLongTrigger := InLong ? close < TrailingTakeProfitLong : false
+    TrailEntryTPShortTrigger := InShort ? close > TrailingTakeProfitShort : false
+    EntryTakeProfit := InLong ? TrailingTakeProfitLong : InShort ? TrailingTakeProfitShort : 0
+    
+
+// ————— In-Trade Stop 8: Last Lo/Hi
+lohiEntryStopLong = low[1]
+lohiEntryStopShort = high[1]
+lohiEntryStopLongTrigger = close < lohiEntryStopLong
+lohiEntryStopShortTrigger = close > lohiEntryStopShort
+
+// // ——————————————— Returns
+// Exit Order Value
+EntryStopLong := stoploss == SL4 ? lohiEntryStopLong : EntryStopLong
+EntryStopShort := stoploss == SL4 ? lohiEntryStopShort : EntryStopShort
+EntryStop := InLong ? EntryStopLong : InShort ? EntryStopShort : EntryStop[1]
+
+// Exit Order Trigger
+EntryStopLongTrigger := stoploss == SL4 ? lohiEntryStopLongTrigger : EntryStopLongTrigger
+EntryStopShortTrigger := stoploss == SL4 ? lohiEntryStopShortTrigger : EntryStopShortTrigger
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ———————————————————————————————————————— 7. Pyramiding Rules ———————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// Here we evaluate the rules determining if pyramiding is allowed.
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ———————————————————————————————————————————————— 8. Exits ——————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Entrys Detection Timeframe close and open
+// exit_res_open = f_secureSecurity(syminfo.tickerid, exit_res, open)
+// exit_res_close = f_secureSecurity(syminfo.tickerid, exit_res, close)
+
+
+// ——————————————— Ichimoku MTF for entrys detection timeframe - > EX1
+// tkxbull_ex = tk_ex > kj_ex
+// tkxbear_ex = tk_ex < kj_ex
+// kbull_ex = ssa_ex > ssb_ex
+// kbear_ex = ssa_ex < ssb_ex
+// csxbull_ex = mom(exit_res_close, cs_offset - 1) > 0
+// csxbear_ex = mom(exit_res_close, cs_offset - 1) < 0
+// price_a_kumo_ex = exit_res_close > ss_high
+// price_b_kumo_ex = exit_res_close < ss_low
+// kijun_long_ex = exit_res_open + exit_res_open / 10000 < kijun and exit_res_close - exit_res_close / 10000 > kijun
+// kijun_short_ex = exit_res_open > kijun and exit_res_close < kijun
+// bullish_ex = tkxbull_ex and kbull_ex and price_a_kumo_ex
+// bearish_ex = tkxbear_ex and kbear_ex and price_b_kumo_ex
+ichiExitLong = bearish and open > kijun and close < kijun
+ichiExitShort = bullish and open < kijun and close > kijun
+
+
+
+// ——————————————— Support / Resistance breakout exit -> EX2
+srExitLong = close < sr_tf1[1]
+srExitShort = close > sr_tf2[1]
+
+
+// ——————————————— Bollinger Bands + ATR Entry -> EX3
+// exit_res_bbsrc = f_secureSecurity(syminfo.tickerid, exit_res, bb_src)
+bbExitLong = crossover(close, bb_lower)
+bbExitShort = crossunder(close, bb_upper)
+
+
+// ——————————————— Momentum LTF Entry -> EX4
+momExitLong = mom0 < 0 and mom1 < 0
+momExitShort = mom0 > 0 and mom1 > 0
+
+
+// ——————————————— Returns
+ExitLong := exits == EX1 ? srExitLong : exits == EX2 ? ichiExitLong : exits == EX4 ? momExitLong : false
+ExitShort := exits == EX1 ? srExitShort : exits == EX2 ? ichiExitShort : exits == EX4 ? momExitShort : false
+
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// —————————————————————————————————————————— 9. Orders Construction——————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Entrys Orders
+LongEntryTrigger := not InTrade ? long_entry and bull and bull_htf and rangefalse and EntryLong : false
+ShortEntryTrigger := not InTrade ? short_entry and bear and bear_htf and rangefalse and EntryShort : false
+EntryTrigger := not InTrade ? LongEntryTrigger or ShortEntryTrigger : false
+
+// ——————————————— Pyramiding Orders
+
+
+
+// ——————————————— Stop Loss Orders
+LongStopTrigger = EntryStopLongTrigger
+ShortStopTrigger = EntryStopShortTrigger
+
+// ——————————————— Take Profit Orders
+LongTPTrigger = EntryTPLongTrigger or TrailEntryTPLongTrigger
+ShortTPTrigger = EntryTPShortTrigger or TrailEntryTPShortTrigger
+
+
+// ——————————————— Exit Orders
+ExitLongTrigger := InLong ? ExitLong or LongStopTrigger or LongTPTrigger : false
+ExitShortTrigger := InShort ? ExitShort or ShortStopTrigger or ShortTPTrigger : false
+ExitTrigger := InTrade ? ExitLongTrigger or ExitShortTrigger : false
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————— 10. Trade Exit Processing ————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// On exit, all currently open positions (1st entry + pyramiding) are closed.
+// Some of the currently valid trade data is needed in further modules,
+// so we don't reset everything just yet. We will finish cleanup in next to last module before leaving the current bar.
+if ExitTrigger[1]
+    // ——————————————— Trade state and numbers.
+    // As for entry, everything starts from the open of the bar following trigger.
+    ExitOrder := open
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————— 11. Plots ————————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ———————————————————— A.1. Global numbers
+
+// plotchar(0, "═════════ All Variables", "", color=color.black)
+// //plotchar(strat,                                                                "strat", "", color=color.blue)
+// //plotchar(TradeDirection,                                                                "TradeDirection", "", color=color.blue)
+// // plotchar(long_entry,                                                                "long_entry", "", color=color.blue)
+// plotchar(Equity,                                                                "Equity", "", color=color.blue)
+// plotchar(EntryStop,                                                                "EntryStop", "", color=color.blue)
+// plotchar(EntryTakeProfit,                                                                "EntryTakeProfit", "", color=color.blue)
+// plotchar(InTrade,                                                                "InTrade", "", color=color.blue)
+// plotchar(LongEntryTrigger,                                                                "LongEntryTrigger", "", color=color.blue)
+// plotchar(InLong,                                                                "InLong", "", color=color.blue)
+// plotchar(ShortEntryTrigger,                                                                "ShortEntryTrigger", "", color=color.blue)
+// plotchar(InShort,                                                                "InShort", "", color=color.blue)
+// // plotchar(Ropen,                                                                "Ropen", "", color=color.blue)
+// // plotchar(Rhigh,                                                                "Rhigh", "", color=color.blue)
+// // plotchar(Rlow,                                                                "Rlow", "", color=color.blue)
+// // plotchar(Rclose,                                                                "Rclose", "", color=color.blue)
+// // plotchar(MinOC,                                                                "MinOC", "", color=color.blue)
+// // plotchar(MaxOC,                                                                "MaxOC", "", color=color.blue)
+// // plotchar(srEntryStop,                                                                "srEntryStop", "", color=color.blue)
+// // plotchar(srEntryStopTrigger,                                                                "srEntryStopTrigger", "", color=color.blue)
+// // plotchar(maxLossPer,                                                                "maxLossPer", "", color=color.blue)
+// // plotchar(fvEntryStop,                                                                "fvEntryStop", "", color=color.blue)
+// // plotchar(fvEntryStopTrigger,                                                                "fvEntryStopTrigger", "", color=color.blue)
+// // plotchar(perEntryStop,                                                                "perEntryStop", "", color=color.blue)
+// // plotchar(perEntryStopTrigger,                                                                "perEntryStopTrigger", "", color=color.blue)
+// // plotchar(minGainPer,                                                                "minGainPer", "", color=color.blue)
+// // plotchar(fvEntryTP,                                                                "fvEntryTP", "", color=color.blue)
+// // plotchar(fvEntryTPTrigger,                                                                "fvEntryTPTrigger", "", color=color.blue)
+// // plotchar(perEntryTP,                                                                "perEntryTP", "", color=color.blue)
+// // plotchar(perEntryTPTrigger,                                                                "perEntryTPTrigger", "", color=color.blue)
+// // plotchar(EntryStopTrigger,                                                                "EntryStopTrigger", "", color=color.blue)
+// // plotchar(EntryTPTrigger,                                                                "EntryTPTrigger", "", color=color.blue)
+// // plotchar(bullish_ltf,                                                                "bullish_ltf", "", color=color.blue)
+// // plotchar(bearish_ltf,                                                                "bearish_ltf", "", color=color.blue)
+// // plotchar(ichiLong,                                                                "ichiLong", "", color=color.blue)
+// // plotchar(ichiShort,                                                                "ichiShort", "", color=color.blue)
+// // plotchar(bullish,                                                                "bullish", "", color=color.blue)
+// // plotchar(bearish,                                                                "bearish", "", color=color.blue)
+// // plotchar(srLong,                                                                "srLong", "", color=color.blue)
+// // plotchar(srShort,                                                                "srShort", "", color=color.blue)
+// // plotchar(bbLong,                                                                "bbLong", "", color=color.blue)
+// // plotchar(bbShort,                                                                "bbShort", "", color=color.blue)
+// // plotchar(momLong,                                                                "momLong", "", color=color.blue)
+// // plotchar(momShort,                                                                "momShort", "", color=color.blue)
+// // plotchar(entryLong,                                                                "entryLong", "", color=color.blue)
+// // plotchar(entryShort,                                                                "entryShort", "", color=color.blue)
+// plotchar(atr,                                                                "ATR", "", color=color.blue)
+// // plotchar(TrailingTakeProfit,                                                                "TrailingTakeProfit", "", color=color.blue)
+// plotchar(InTrailingTP,                                                                "InTrailingTP", "", color=color.blue)
+// // plotchar(perEntryTPLongTrigger,                                                                "perEntryTPLongTrigger", "", color=color.blue)
+// // plotchar(perEntryTPShortTrigger,                                                                "perEntryTPShortTrigger", "", color=color.blue)
+// // plotchar(perEntryTPLong,                                                                "perEntryTPLong", "", color=color.blue)
+// // plotchar(perEntryTPShort,                                                                "perEntryTPShort", "", color=color.blue)
+// // plotchar(fvEntryTPLong,                                                                "fvEntryTPLong", "", color=color.blue)
+// // plotchar(fvEntryTPShort,                                                                "fvEntryTPShort", "", color=color.blue)
+// // plotchar(fvEntryTPLongTrigger,                                                                "fvEntryTPTriggerLong", "", color=color.blue)
+// // plotchar(fvEntryTPShortTrigger,                                                                "fvEntryTPTriggerShort", "", color=color.blue)
+// plotchar(minGainPer,                                                                "minGainPer", "", color=color.blue)
+// plotchar(Ropen,                                                                "Ropen", "", color=color.blue)
+// plotchar(ExitTrigger,                                                                "ExitTrigger", "", color=color.blue)
+// plotchar(MaxReached,                                                                "MaxReached", "", color=color.blue)
+// plotchar(MinReached,                                                                "MinReached", "", color=color.blue)
+// plotchar(ExitLongTrigger,                                                                "ExitLongTrigger", "", color=color.blue)
+// plotchar(ExitShortTrigger,                                                                "ExitShortTrigger", "", color=color.blue)
+// plotchar(atrper,                                                                "atrper", "", color=color.blue)
+// // plotchar(TrailEntryTPLongTrigger,                                                                "", "", color=color.blue)
+// plotchar(TrailEntryTPLongTrigger,                                                                "TrailEntryTPLongTrigger", "", color=color.blue)
+// plotchar(TrailEntryTPShortTrigger,                                                                "TrailEntryTPShortTrigger", "", color=color.blue)
+plotchar(All_Entries,                                                                "All_Entries", "", color=color.blue)
+// // plotchar(Equity,                                                                "", "", color=color.blue)
+// // plotchar(Equity,                                                                "", "", color=color.blue)
+// plotchar(0, "═════════ Trade Information", "", color=color.black)
+// plotchar(EntryOrder,                                                                         "1ST: Entry Order Value", "", color=color.blue)                                    // ————— Show
+
+
+// ——————————————— ADX Range Detector
+//s = plot(sig, color=sig > seuil ? color.lime : color.orange, linewidth=4, transp=0, title="ADX")
+//t = plot(seuil, color=color.red, title="Thresold")
+//fill(s, t, color=sig > seuil ? color.green : color.red, transp=0, title="Cloud Color")
+
+
+
+// ——————————————— Trend Plots (_0)
+// Ichimoku
+p_tenkan = plot(_0 and trend == TR1 ? tenkan : na, color=MyRedRaw, linewidth=2, title="Tenkan-Sen")
+p_kijun = plot(_0 and trend == TR1 ? kijun : na, color=MyGreenRaw, linewidth=2, title="Kijun-Sen")
+p_chikou = plot(_0 and trend == TR1 ? close : na, offset=-cs_offset + 1, color=#0101DF, linewidth=2, title="Chikou-Span")
+p_sa = plot(_0 and trend == TR1 ? senkouA : na, offset=ss_offset - 1, color=color.red, linewidth=2, title="Senkou-Span A")
+p_sb = plot(_0 and trend == TR1 ? senkouB : na, offset=ss_offset - 1, color=#5882FA, linewidth=2, title="Senkou-Span B")
+fill(p_sa, p_sb, color=senkouA > senkouB ? #5882FA : #FE2E2E, transp=70, title="Cloud color")
+
+// Moving Average
+p_ma = plot(_0 and trend != TR1 ? trend_plot : na, color=bull ? MyGreenRaw : MyRedRaw, linewidth=4, title="MA")
+
+// ——————————————— Trend Higher timeframe Plots (_1)
+// Ichimoku
+p_tenkan_htf = plot(_1 and trend_htf == HT1 ? tk : na, color=MyRedMedium, linewidth=2, title="Tenkan-Sen")
+p_kijun_htf = plot(_1 and trend_htf == HT1 ? kj : na, color=MyGreenMedium, linewidth=2, title="Kijun-Sen")
+p_chikou_htf = plot(_1 and trend_htf == HT1 ? f_secureSecurity(syminfo.tickerid, trend_res, close) : na, offset=-cs_offset + 1, color=#0101DF, linewidth=2, title="Chikou-Span")
+p_sa_htf = plot(_1 and trend_htf == HT1 ? ssa : na, offset=ss_offset - 1, color=color.red, linewidth=2, title="Senkou-Span A")
+p_sb_htf = plot(_1 and trend_htf == HT1 ? ssb : na, offset=ss_offset - 1, color=#5882FA, linewidth=2, title="Senkou-Span B")
+fill(p_sa_htf, p_sb_htf, color=ssa > ssb ? #5882FA : #FE2E2E, transp=70, title="Cloud color")
+
+// Moving Average
+p_ma_htf = plot(_1 and trend_htf != HT1 ? trend_plot_htf : na, color=bull_htf ? MyGreenMedium : MyRedMedium, linewidth=3, title="Higher TF MA")
+
+// ——————————————— Range Detector Plot (_2)
+rangecolor = rangefalse ? MyGreenBackGround : MyRedBackGround
+bgcolor(_2 ? rangecolor : na)
+
+// ——————————————— SR Line plotting (_3, _4, _5)
+var tf1_line = line.new(0, 0, 0, 0)
+var tf1_bi_start = 0
+var tf1_bi_end = 0
+tf1_bi_start := change(sr_tf1) ? bar_index : tf1_bi_start[1]
+tf1_bi_end := change(sr_tf1) ? tf1_bi_start : bar_index
+if change(sr_tf1)
+    if (line.get_x2(tf1_line) - line.get_x1(tf1_line)) < sr_lvl_min_len
+        line.delete(tf1_line)
+    tf1_line := line.new(tf1_bi_start, sr_tf1, tf1_bi_end, sr_tf1, color = sr_colour(sr_y), width = sr_line_width, extend = sr_line_extend)
+p_support = iff((_3 and entrys == EN2) or (_4 and exits == EX1) or (_5 and stoploss == SL1), true, false)
+
+line.set_x2(p_support ? tf1_line : na, p_support ? tf1_bi_end : na)
+
+var tf2_line = line.new(0, 0, 0, 0)
+var tf2_bi_start = 0
+var tf2_bi_end = 0
+tf2_bi_start := change(sr_tf2) ? bar_index : tf2_bi_start[1]
+tf2_bi_end := change(sr_tf2) ? tf2_bi_start : bar_index
+if change(sr_tf2)
+    if (line.get_x2(tf2_line) - line.get_x1(tf2_line)) < sr_lvl_min_len
+        line.delete(tf2_line)
+    tf2_line := line.new(tf2_bi_start, sr_tf2, tf2_bi_end, sr_tf2, color =  sr_colour(sr_y), width = sr_line_width, extend = sr_line_extend)
+p_resistance = iff((_3 and entrys == EN2) or (_4 and exits == EX1) or (_5 and stoploss == SL1), true, false)
+line.set_x2(p_resistance ? tf2_line : na, p_resistance ? tf2_bi_end : na)
+
+// ——————————————— Bollinger Bands
+p_bb = iff((_3 and entrys == EN3), true, false)
+plot(p_bb ? bb_basis : na, "BB Basis", color=#872323)
+
+bb_p1 = plot(p_bb ? bb_upper : na, "BB Upper", color=color.teal)
+bb_p2 = plot(p_bb ? bb_lower : na, "BB Lower", color=color.teal)
+fill(bb_p1, bb_p2, title = "BB Background", color=#198787, transp=95)
+
+
+
+// ——————————————— StopLoss Plotting (_5)
+var sl_line = line.new(0, 0, 0, 0)
+var sl_bi_start = 0
+var sl_bi_end = 0
+sl_bi_start := change(EntryStop) ? bar_index : sl_bi_start[1]
+sl_bi_end := ExitTrigger[1] ? sl_bi_end[1] : bar_index
+if change(EntryStop)
+    if line.get_y1(sl_line) == 0 or line.get_y2(sl_line) == 0
+        line.delete(sl_line)
+    sl_line := EntryStop > (0.5*close) ? line.new(sl_bi_start, EntryStop, sl_bi_end, EntryStop, color = color.red, width = sr_line_width, extend = sr_line_extend) : na
+p_stoploss = iff((_5 and stoploss == SL3 or stoploss == SL2), true, false)
+line.set_x2(p_stoploss and InTrade[1] ? sl_line : na, p_stoploss and InTrade[1] ? sl_bi_end : na)
+
+
+// ——————————————— TakeProfit Plotting (_6)
+// Fixed TP
+var tp_line = line.new(0, 0, 0, 0)
+var tp_bi_start = 0
+var tp_bi_end = 0
+tp_bi_start := change(EntryTakeProfit) ? bar_index : tp_bi_start[1]
+tp_bi_end := ExitTrigger[1] ? tp_bi_end[1] : bar_index
+if change(EntryTakeProfit)
+    if line.get_y1(tp_line) == 0
+        line.delete(tp_line)
+    tp_line := EntryTakeProfit > (0.5*close) ? line.new(tp_bi_start, EntryTakeProfit, tp_bi_end, EntryTakeProfit, color = color.green, width = sr_line_width, extend = sr_line_extend) : na
+p_takeprofit = iff((_6 and takeprofit == TP1 or takeprofit == TP2), true, false)
+if not p_takeprofit
+    line.delete(tp_line)
+line.set_x2(p_takeprofit and InTrade[1] ? tp_line : na, p_takeprofit and InTrade[1] ? tp_bi_end : na)
+
+// Trailing TP
+p_ttakeprofit = _6 and takeprofit == TP3 and InTrade
+p_ttp = plot(p_ttakeprofit and EntryTakeProfit != 0 and InTrailingTP ? EntryTakeProfit : na, "Trailing TP", color=MyGreenSemiDark)
+
+
+// ——————————————— Debugging Plots
+// ——————————————— Ichimoku MTF
+// plot(tenkan, color=MyRedRaw, linewidth=2, title="Tenkan-Sen")
+// plot(kijun, color=MyGreenRaw, linewidth=2, title="Kijun-Sen")
+// plot(close, offset=-cs_offset + 1, color=#0101DF, linewidth=2, title="Chikou-Span")
+// sa = plot(senkouA, offset=ss_offset - 1, color=color.red, linewidth=2, title="Senkou-Span A")
+// sb = plot(senkouB, offset=ss_offset - 1, color=#5882FA, linewidth=2, title="Senkou-Span B")
+// fill(sa, sb, color=senkouA > senkouB ? #5882FA : #FE2E2E, transp=70, title="Cloud color")
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————————————— 11. Alerts —————————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// If your alerts are sent to an execution bot, then you will need to include the proper encoding in the message field.
+
+alert_message_enter_long = '{"key":"' + zignaly_key + '","pair":"' + syminfo.ticker + '","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"' + tostring(zignaly_lev) + '","signalId":"' + syminfo.ticker + '"}'
+alert_message_enter_short = '{"key":"' + zignaly_key + '","pair":"' + syminfo.ticker + '","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"' + tostring(zignaly_lev) + '","signalId":"' + syminfo.ticker + '"}'
+alert_message_exit = '{"key":"' + zignaly_key + '","pair":"' + syminfo.ticker + '","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"' + syminfo.ticker + '"}'
+
+
+// alertcondition(LongEntryTrigger, title="Open Long BTC", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"BTCUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"20","signalId":"BTCUSDT"}')
+// alertcondition(ShortEntryTrigger, title="Open Short BTC", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"BTCUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"20","signalId":"BTCUSDT"}')
+// alertcondition(ExitLongTrigger, title="Close Long BTC", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"BTCUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"BTCUSDT"}')
+// alertcondition(ExitShortTrigger, title="Close Short BTC", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"BTCUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"BTCUSDT"}')
+
+// alertcondition(LongEntryTrigger, title="Open Long ETH", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ETHUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"20","signalId":"ETHUSDT"}')
+// alertcondition(ShortEntryTrigger, title="Open Short ETH", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ETHUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"20","signalId":"ETHUSDT"}')
+// alertcondition(ExitLongTrigger, title="Close Long ETH", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ETHUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"ETHUSDT"}')
+// alertcondition(ExitShortTrigger, title="Close Short ETH", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ETHUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"ETHUSDT"}')
+
+// alertcondition(LongEntryTrigger, title="Open Long LINK", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"LINKUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"20","signalId":"LINKUSDT"}')
+// alertcondition(ShortEntryTrigger, title="Open Short LINK", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"LINKUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"20","signalId":"LINKUSDT"}')
+// alertcondition(ExitLongTrigger, title="Close Long LINK", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"LINKUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"LINKUSDT"}')
+// alertcondition(ExitShortTrigger, title="Close Short LINK", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"LINKUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"LINKUSDT"}')
+
+// alertcondition(LongEntryTrigger, title="Open Long ADA", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ADAUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"20","signalId":"ADAUSDT"}')
+// alertcondition(ShortEntryTrigger, title="Open Short ADA", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ADAUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"20","signalId":"ADAUSDT"}')
+// alertcondition(ExitLongTrigger, title="Close Long ADA", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ADAUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"ADAUSDT"}')
+// alertcondition(ExitShortTrigger, title="Close Short ADA", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"ADAUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"ADAUSDT"}')
+
+// alertcondition(LongEntryTrigger, title="Open Long XLM", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"XLMUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"long","orderType":"market","leverage":"20","signalId":"XLMUSDT"}')
+// alertcondition(ShortEntryTrigger, title="Open Short XLM", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"XLMUSDT","exchange":"binance","exchangeAccountType":"futures","type":"entry","side":"short","orderType":"market","leverage":"20","signalId":"XLMUSDT"}')
+// alertcondition(ExitLongTrigger, title="Close Long XLM", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"XLMUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"XLMUSDT"}')
+// alertcondition(ExitShortTrigger, title="Close Short XLM", message='{"key":"cf1fc415944280e4431172253e96f49d","pair":"XLMUSDT","exchange":"binance","exchangeAccountType":"futures","type":"exit","orderType":"market","signalId":"XLMUSDT"}')
+
+
+//alertcondition(change(tf1) != 0 or change(tf2) != 0 , message = "New S/R line" )
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ———————————————————————————————————————————— 12. Variable resets ———————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ———————————————————— Last cleanup of exits.
+// Now that we have used and plotted all Exit information, we can do final cleanup before next bar.
+// Some of these values are reset a second time at the beginning of cycles;
+// they are nonetheless reset here for cleaner between trade display purposes.
+if ExitTrigger[1]
+    EntryOrder := 0.0
+    // // EntryX := 0.0
+    // // EntryXPct := 0.0
+    // // EntryXEqu := 0.0
+    ExitOrder := 0.0
+    // // TakeProfitLevel := 0.0
+    // // TradeMaxDrawdown := 0.0
+    // // Take Profit Target
+    EntryTakeProfit := 0.0
+    // // Trailing Take Profit Target
+    TrailingTakeProfitLong := 0.0
+    TrailingTakeProfitShort := 0.0
+    // // Target level for hard exits.
+    TakeProfitLevel := 0.0
+    // // Trade length in bars.
+    TradeLength := 0
+    // // Max in-trade drawdown.
+    TradeMaxDrawdown := 0.0
+    
+    InTradeStop := 0.0       // Last valid in-trade stop (we always use previous bar's stop for comparison to price, so must be used indexed).
+    MaxReached := 0.0        // Max high/low reached since beginning of trade.
+    MinReached := 0.0        // Min high/low reached since beginning of trade.
+    TradeDrawdown := 0.0     // Discrete drawdown at each bar in trade's history, to be used to determine trade max drawdown.
+    TradePLX := 0.0          // Trade PL (X), after slippage.
+    TradePLXMax := 0.0       // Highest PL (X) reached during trade.
+    TradePLXMin := 0.0       // Lowest PL (X) reached during trade.
+    TradePLPct := 0.0       // Trade PL (%) after slippage.
+    TradePLEqu := 0.0        // Net trade PL (equ), i.e. including slippage AND fees.
+    
+    
+    // ———————————————————— C. State and misc vars.
+    // These variables get updated after triggers and during trades.
+    // They do not require propagation because they are derived from the state of other propagated information or previous states.
+    EntryTrigger := false            // True when an entry trigger is detected.
+    ExitTrigger := false             // True when an exit trigger is detected
+    PyramidEntry := false            // True when a long/short pyramid entry occurs.
+    InTrade := false                 // True when in InLong or InShort is true.
+    ExitCondition := false           // True when stop breached, take profit or target level reached.
+    EntryLong := false
+    EntryShort := false
+    ExitLong := false
+    ExitShort := false
+    ExitLongTrigger := false
+    ExitShortTrigger := false
+    // ————— Longs
+    LongEntryTrigger := false        // Becomes true on the bar when entry order is to be issued; false otherwise.
+    InLong := false                 // True from bar after entry trigger to bar of exit trigger, inclusively.
+    // ————— Shorts
+    ShortEntryTrigger := false       // Becomes true on the bar when entry order is to be issued; false otherwise.
+    InShort := false                 // True from bar after entry trigger to bar of exit trigger, inclusively.
+    // ————— Take Profit
+    InTrailingTP := false            // Becomes true when trade enter in Trailing Take Profit
+    TrailEntryTPLongTrigger := false     // Becomes true when price trigger trailing stop
+    TrailEntryTPShortTrigger := false
+    EntryStopLongTrigger := false
+    EntryStopShortTrigger := false
+    EntryTPLongTrigger := false
+    EntryTPShortTrigger := false
+    EntryStop := 0.0
+    EntryStopLong := 0.0
+    EntryStopShort := 0.0
+    EntryTakeProfitLong := 0.0
+    EntryTakeProfitShort := 0.0
+    
+
+
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// —————————————————————————————————————————— 13. Strategy() calls ————————————————————————————————————————————————————————
+// ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+// ——————————————— Entry
+
+// strategy.risk.max_cons_loss_days(10)
+// strategy.risk.max_drawdown(20, strategy.percent_of_equity)
+
+strategy.entry("Long", strategy.long, when = LongEntryTrigger[1], alert_message = alert_message_enter_long)
+strategy.entry("Short", strategy.short, when = ShortEntryTrigger[1], alert_message = alert_message_enter_short)
+// ——————————————— Close
+strategy.close("Long", when= ExitLongTrigger[1], alert_message = alert_message_exit)
+strategy.close("Short", when= ExitShortTrigger[1], alert_message = alert_message_exit)
+// ——————————————— Exit
+//strategy.exit("Long", when=kijun_break_short)
+//strategy.exit("Short", when=kijun_break_long)

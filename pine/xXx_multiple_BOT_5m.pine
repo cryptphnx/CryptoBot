@@ -1,0 +1,271 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © wielkieef
+
+//@version=4
+
+
+strategy("xXx multiple BOT [5min]", overlay = true, pyramiding=100,initial_capital = 10000, default_qty_type= strategy.percent_of_equity, default_qty_value = 10, calc_on_order_fills=false, slippage=0,commission_type=strategy.commission.percent,commission_value=0.03)
+
+ 
+//SOURCE =============================================================================================================================================================================================================================================================================================================
+
+src                 =                   input(open)
+
+//ADX-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// inputs
+
+ADX_options         =                   input("CLASSIC",                   title="  ADX Option",                                       options = ["CLASSIC", "MASANAKAMURA"],                                          group = "ADX")
+ADX_len             =                   input(18,                               title="  ADX Lenght",                                       type = input.integer, minval = 1,                                               group = "ADX")
+th                  =                   input(14,                             title="  ADX Treshold",                                    type = input.float, minval = 0, step = 0.5,                                     group = "ADX")
+
+// calc
+
+calcADX(_len) =>
+    up              =                                                                                                                       change(high)
+	down            =                                                                                                                      -change(low)
+	plusDM          =                                                                                                                       na(up)   ? na : (up > down and up > 0   ? up   : 0)
+    minusDM         =                                                                                                                       na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange       =                                                                                                                       rma(tr, _len)
+	_plus           =                                                                                                                       fixnan(100 * rma(plusDM, _len)  / truerange)
+	_minus          =                                                                                                                       fixnan(100 * rma(minusDM, _len) / truerange)
+	sum             =                                                                                                                       _plus + _minus
+	_adx            =                                                                                                                       100 * rma(abs(_plus - _minus) / (sum == 0 ? 1 : sum), _len)
+    [_plus,_minus,_adx]
+calcADX_Masanakamura(_len) =>
+    SmoothedTrueRange                   =                                                                                                   0.0
+    SmoothedDirectionalMovementPlus     =                                                                                                   0.0
+    SmoothedDirectionalMovementMinus    =                                                                                                   0.0
+    TrueRange                           =                                                                                                   max(max(high - low, abs(high - nz(close[1]))), abs(low - nz(close[1])))
+    DirectionalMovementPlus             =                                                                                                   high - nz(high[1]) > nz(low[1]) - low ? max(high - nz(high[1]), 0) : 0
+    DirectionalMovementMinus            =                                                                                                   nz(low[1]) - low > high - nz(high[1]) ? max(nz(low[1]) - low, 0)   : 0
+    SmoothedTrueRange                   :=                                                                                                  nz(SmoothedTrueRange[1]) - (nz(SmoothedTrueRange[1]) /_len) + TrueRange
+    SmoothedDirectionalMovementPlus     :=                                                                                                  nz(SmoothedDirectionalMovementPlus[1])  - (nz(SmoothedDirectionalMovementPlus[1])  / _len) + DirectionalMovementPlus
+    SmoothedDirectionalMovementMinus    :=                                                                                                  nz(SmoothedDirectionalMovementMinus[1]) - (nz(SmoothedDirectionalMovementMinus[1]) / _len) + DirectionalMovementMinus
+    DIP                                 =                                                                                                   SmoothedDirectionalMovementPlus  / SmoothedTrueRange * 100
+    DIM                                 =                                                                                                   SmoothedDirectionalMovementMinus / SmoothedTrueRange * 100
+    DX                                  =                                                                                                   abs(DIP-DIM) / (DIP+DIM)*100
+    adx                                 =                                                                                                   sma(DX, _len)
+    [DIP,DIM,adx]
+[DIPlusC,DIMinusC,ADXC] =                                                                                                                   calcADX(ADX_len) 
+[DIPlusM,DIMinusM,ADXM] =                                                                                                                   calcADX_Masanakamura(ADX_len)
+
+DIPlus                  =                                                                                                                   ADX_options == "CLASSIC" ? DIPlusC    : DIPlusM
+DIMinus                 =                                                                                                                   ADX_options == "CLASSIC" ? DIMinusC   : DIMinusM
+ADX                     =                                                                                                                   ADX_options == "CLASSIC" ? ADXC       : ADXM
+
+// condt 
+
+L_adx                   =                                                       DIPlus > DIMinus and ADX > th
+S_adx                   =                                                       DIPlus < DIMinus and ADX > th
+
+// Support and Resistance ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// inputs 
+
+left                =                   input(4,                                title="  Left",                                                                                                                               group="Support and Resistance")
+right               =                   input(5,                                title="  Right",                                                                                                                              group="Support and Resistance")
+
+// calc 
+
+hih                 =                                                                                                                       pivothigh(high, left, right)
+lol                 =                                                                                                                       pivotlow (low , left, right)
+top                 =                                                                                                                       valuewhen(hih, high[right], 0)
+bot                 =                                                                                                                       valuewhen(lol, low [right], 0)
+RS_Long_condt       =                                                           close > top
+RS_Short_condt      =                                                           close < bot
+
+// condt 
+
+L_cross             =                                                           crossover(close, top)
+S_cross             =                                                           crossunder(close,bot)
+
+// ARA  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+// inputs
+
+length_                =                   input(15,                                title="  Lenght",                                                                                                                               group="ARA")
+gamma               =                   input(3.0,                                title="  Gamma",                                                                                                                              group="ARA")
+
+// calc 
+
+zl = false
+ma = 0.
+mad = 0.
+ma4h = 0.
+mad4h = 0.
+src_ = zl ? close + change(close,length_/2) : close
+ma := nz(mad[1],src_)
+d = cum(abs(src_[length_] - ma))/ bar_index * gamma
+mad := sma(sma(src_ > nz(mad[1],src_) + d ? src_ + d : src_ < nz(mad[1],src_) - d ? src_ - d : nz(mad[1],src_),length_),length_)
+mad_up = mad > mad[1]
+Length1 = 400
+SMA1 = sma(close, Length1)
+Long_MA =  (SMA1 < close )
+Short_MA = (SMA1 > close )
+madup = mad > mad[1] ? #009688  : #f06292
+
+// condt 
+
+mad_f = mad/mad[1] > .999 and mad/mad[1] < 1.001
+
+//STRATEGY ==========================================================================================================================================================================================================================================================================================================
+
+L_1     =                                                                       Long_MA and L_adx and RS_Long_condt  and not mad_f 
+S_1     =                                                                       Short_MA and S_adx and RS_Short_condt  and not mad_f 
+
+
+L_basic_condt       =     L_1
+S_basic_condt       =     S_1 
+
+var bool longCondition          = na
+var bool shortCondition         = na
+var float last_open_longCondition = na
+var float last_open_shortCondition = na
+var int last_longCondition = 0
+var int last_shortCondition = 0
+longCondition := L_basic_condt
+shortCondition := S_basic_condt
+last_open_longCondition := longCondition ? close : nz(last_open_longCondition[1])
+last_open_shortCondition := shortCondition ? close : nz(last_open_shortCondition[1])
+last_longCondition := longCondition ? time : nz(last_longCondition[1])
+last_shortCondition := shortCondition ? time : nz(last_shortCondition[1])
+in_longCondition = last_longCondition > last_shortCondition
+in_shortCondition = last_shortCondition > last_longCondition
+
+// SWAP-SL ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+var int last_long_sl = na
+var int last_short_sl = na
+sl = 1.2
+long_sl = crossunder(low, (1-(sl/100))*last_open_longCondition) and in_longCondition and not longCondition
+short_sl = crossover(high, (1+(sl/100))*last_open_shortCondition) and in_shortCondition and not shortCondition
+last_long_sl := long_sl ? time : nz(last_long_sl[1])
+last_short_sl := short_sl ? time : nz(last_short_sl[1])
+var bool CondIni_long_sl = 0
+CondIni_long_sl := long_sl ? 1 : longCondition ? -1 : nz(CondIni_long_sl[1])
+var bool CondIni_short_sl = 0
+CondIni_short_sl := short_sl ? 1 : shortCondition ? -1 : nz(CondIni_short_sl[1])
+Final_Long_sl = long_sl and nz(CondIni_long_sl[1]) == -1 and in_longCondition and not longCondition
+Final_Short_sl = short_sl and nz(CondIni_short_sl[1]) == -1 and in_shortCondition and not shortCondition
+var int sectionLongs = 0
+sectionLongs := nz(sectionLongs[1])
+var int sectionShorts = 0
+sectionShorts := nz(sectionShorts[1])
+
+// RE-ENTRY ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if longCondition or Final_Long_sl
+    sectionLongs := sectionLongs + 1
+    sectionShorts := 0
+if shortCondition or Final_Short_sl
+    sectionLongs := 0
+    sectionShorts := sectionShorts + 1
+var float sum_long = 0.0
+var float sum_short = 0.0
+
+if longCondition
+    sum_long := nz(last_open_longCondition) + nz(sum_long[1])
+    sum_short := 0.0
+if Final_Long_sl
+    sum_long := ((1-(sl/100))*last_open_longCondition) + nz(sum_long[1])
+    sum_short := 0.0
+if shortCondition
+    sum_short := nz(last_open_shortCondition) + nz(sum_short[1])
+    sum_long := 0.0
+if Final_Short_sl
+    sum_long := 0.0
+    sum_short := ((1+(sl/100))*last_open_shortCondition) + nz(sum_short[1])
+   
+var float Position_Price = 0.0
+Position_Price := nz(Position_Price[1])
+Position_Price := longCondition or Final_Long_sl ? sum_long/(sectionLongs) : shortCondition or Final_Short_sl ? sum_short/(sectionShorts) : na
+
+//TP_1 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+tp = input(1.0, "Tp-1 ", type = input.float, minval = 0, step = 0.1, group="strategy settings")
+long_tp = crossover(high, (1+(tp/100))*fixnan(Position_Price)) and in_longCondition and not longCondition
+short_tp = crossunder(low, (1-(tp/100))*fixnan(Position_Price)) and in_shortCondition and not shortCondition
+var int last_long_tp = na
+var int last_short_tp = na
+last_long_tp := long_tp ? time : nz(last_long_tp[1])
+last_short_tp := short_tp ? time : nz(last_short_tp[1])
+Final_Long_tp = long_tp and last_longCondition > nz(last_long_tp[1])
+Final_Short_tp = short_tp and last_shortCondition > nz(last_short_tp[1])
+ltp = iff(Final_Long_tp, (fixnan(Position_Price)*(1+(tp/100))), na)
+stp = iff(Final_Short_tp, (fixnan(Position_Price)*(1-(tp/100))), na)
+if Final_Short_tp or Final_Long_tp
+    sum_long := 0.0
+    sum_short := 0.0
+    sectionLongs := 0
+    sectionShorts := 0
+if Final_Long_tp
+    CondIni_long_sl == 1
+if Final_Short_tp
+    CondIni_short_sl == 1
+    
+//TP_2 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+tp2 = input(1.7, "Tp-2 ", type = input.float, minval = 0, step = 0.1, group="strategy settings")
+long_tp2 = crossover(high, (1+(tp2/100))*fixnan(Position_Price)) and in_longCondition and not longCondition
+short_tp2 = crossunder(low, (1-(tp2/100))*fixnan(Position_Price)) and in_shortCondition and not shortCondition
+var int last_long_tp2 = na
+var int last_short_tp2 = na
+last_long_tp2 := long_tp2 ? time : nz(last_long_tp2[1])
+last_short_tp2 := short_tp2 ? time : nz(last_short_tp2[1])
+Final_Long_tp2 = long_tp2 and last_longCondition > nz(last_long_tp2[1])
+Final_Short_tp2 = short_tp2 and last_shortCondition > nz(last_short_tp2[1])
+CondIni_long_sl := long_sl or Final_Long_tp ? 1 : longCondition ? -1 : nz(CondIni_long_sl[1])
+CondIni_short_sl := short_sl or Final_Short_tp? 1 : shortCondition ? -1 : nz(CondIni_short_sl[1])
+ltp2 = iff(Final_Long_tp2, (fixnan(Position_Price)*(1+(tp2/100))), na)
+stp2 = iff(Final_Short_tp2, (fixnan(Position_Price)*(1-(tp2/100))), na)
+
+// COLORS & PLOTS --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+bar_color = L_adx ? #009688 : S_adx ? #f06292 : color.gray
+ara_col = in_longCondition and not mad_f ? #009688 : in_shortCondition and not mad_f ? #f06292 : color.gray
+
+barcolor                                                                        (color = bar_color)
+
+plot(mad, title="ARA",  color=ara_col, style = plot.style_cross, linewidth=4, transp=0)
+
+plotshape(longCondition,            title="Long",                   style=shape.triangleup,                 location=location.belowbar,                         color=color.blue,           size=size.tiny ,                                                           transp = 0                  )
+plotshape(shortCondition,           title="Short",                  style=shape.triangledown,               location=location.abovebar,                         color=color.red,            size=size.tiny ,                                                           transp = 0                  )
+
+plot(ltp2, style=plot.style_cross, linewidth=6, color = color.fuchsia, editable = false)
+plot(stp2, style=plot.style_cross, linewidth=6, color = color.fuchsia, editable = false)
+plot(ltp, style=plot.style_cross, linewidth=6, color = color.fuchsia, editable = false)
+plot(stp, style=plot.style_cross, linewidth=6, color = color.fuchsia, editable = false)
+
+//BACKTESTING--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+Q = 50
+
+strategy.entry("long", strategy.long, when = (longCondition ))
+strategy.entry("short", strategy.short, when = (shortCondition ))
+
+strategy.exit("TP", "long", qty_percent = Q, limit = (fixnan(Position_Price)*(1+(tp/100))))
+strategy.exit("TP", "short", qty_percent = Q, limit = (fixnan(Position_Price)*(1-(tp/100))))
+
+strategy.exit("TP2", "long", qty_percent = abs(100-Q), limit = (fixnan(Position_Price)*(1+(tp2/100))))
+strategy.exit("TP2", "short", qty_percent = abs(100-Q), limit = (fixnan(Position_Price)*(1-(tp2/100))))
+
+
+
+
+
+
+
+//
+//
+//
+//
+//
+//
+
+// By wielkieef
+
+
+
+

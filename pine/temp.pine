@@ -1,0 +1,68 @@
+//@version=5
+strategy(title='Joker Trailing TP Bot', shorttitle='Joker TTP Bot', overlay=true, pyramiding=0, process_orders_on_close=false, close_entries_rule='ANY', calc_on_every_tick=false, calc_on_order_fills=false, commission_type=strategy.commission.percent, commission_value=0.07, default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=1000, currency=currency.USD) //, max_labels_count=500)
+
+fromDate = input.time(timestamp('01 Jan 2021 00:00 UTC'), 'From Date')
+toDate = input.time(timestamp('31 Dec 2121 23:59 UTC'), 'To Date')
+fastMALen = input.int(23, 'Fast SMA Length')
+slowMALen = input.int(50, 'Slow SMA Length')
+longTakeProfitPerc = input.float(0.5, 'Long Take Profit %', minval=0.05, step=0.05) * 0.01
+shortTakeProfitPerc = input.float(0.5, 'Short Take Profit %', minval=0.05, step=0.05) * 0.01
+enableTrailing = input.bool(true, 'Enable Trailing')
+trailingTakeProfitPerc = input.float(0.01, 'Trailing Take Profit %', minval=0.01, maxval=100, step=0.01) * 0.01
+PosAmountUSD= input.float(50, "Pos Size USD", minval = 20, step=5, group='═══════════ Strategy Setting ═══════════', tooltip='Same As Order Size in the properties tab')
+PosAmount   = PosAmountUSD / close
+PosLeft     = PosAmountUSD / strategy.position_avg_price
+
+//stop and take
+first_high_stop = ta.highest(high, p) - x * ta.atr(p)
+first_low_stop = ta.lowest(low, p) + x * ta.atr(p)
+stop_short = ta.highest(first_high_stop, q)
+stop_long = ta.lowest(first_low_stop, q)
+
+float fastMA = ta.sma(close, fastMALen)
+float slowMA = ta.sma(close, slowMALen)
+bool isWithinPeriod = time >= fromDate and time <= toDate
+bool openLongPosition = isWithinPeriod and ta.crossover(fastMA, slowMA)
+bool openShortPosition = isWithinPeriod and ta.crossunder(fastMA, slowMA)
+bool longIsActive = openLongPosition or strategy.position_size > 0
+bool shortIsActive = openShortPosition or strategy.position_size < 0
+
+float longTakeProfitPrice = na
+longTakeProfitPrice := if longIsActive
+    if openLongPosition and not (strategy.position_size > 0)
+        close * (1 + longTakeProfitPerc)
+    else
+        nz(longTakeProfitPrice[1], close * (1 + longTakeProfitPerc))
+else
+    na
+
+float shortTakeProfitPrice = na
+shortTakeProfitPrice := if shortIsActive
+    if openShortPosition and not (strategy.position_size < 0)
+        close * (1 - shortTakeProfitPerc)
+    else
+        nz(shortTakeProfitPrice[1], close * (1 - shortTakeProfitPrice))
+else
+    na
+
+float longTrailingTakeProfitStepTicks = longTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+float shortTrailingTakeProfitStepTicks = shortTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+
+// === Alertatron KEY ===// /
+alertatron_key_enter_long  = 'market(side=buy, amount=' + str.tostring(PosAmount) + ');stopOrder(side=sell, amount=' + str.tostring(PosAmount) + ', offset=@' + str.tostring(stop_long) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_tsl_long     = 'cancel(which=tagged, tag=stop' + str.tostring(syminfo.ticker) + ');trailingStop(side=sell, amount=' + str.tostring(PosAmount) + ', offset=' + str.tostring(trailingTakeProfitPerc*100) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_exit_long   = 'StopLoss'
+alertatron_key_enter_short = 'market(side=sell, amount=' + str.tostring(PosAmount) + ');stopOrder(side=buy, amount=' + str.tostring(PosAmount) + ', offset=@' + str.tostring(stop_short) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_tsl_short    = 'cancel(which=tagged, tag=stop' + str.tostring(syminfo.ticker) + ');trailingStop(side=buy, amount=' + str.tostring(PosAmount) + ', offset=' + str.tostring(trailingTakeProfitPerc*100) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_exit_short  = 'StopLoss'
+
+strategy.entry(id = 'Long Entry', direction = strategy.long, when = openLongPosition, comment = 'Long', alert_message = alertatron_key_enter_long)
+strategy.entry(id = 'Short Entry', direction = strategy.short, when = openShortPosition, comment = 'Short', alert_message = alertatron_key_enter_short)
+strategy.exit(id = 'SL-TSL Long', from_entry = 'Long Entry', stop=stop_long, limit = enableTrailing ? na : longTakeProfitPrice, trail_price = enableTrailing ? longTakeProfitPrice : na, trail_offset = enableTrailing ? longTrailingTakeProfitStepTicks : na, when = longIsActive, alert_message = 'Long(' + syminfo.ticker + '): Take Profit activated', comment_profit='TP', comment_loss='SL', comment_trailing='TSL', alert_trailing=alertatron_key_tsl_long)
+strategy.exit(id = 'SL-TSL Long', from_entry = 'Short Entry', stop=stop_short, limit = enableTrailing ? na : shortTakeProfitPrice, trail_price = enableTrailing ? shortTakeProfitPrice : na, trail_offset = enableTrailing ? shortTrailingTakeProfitStepTicks : na, when = shortIsActive, alert_message = 'Short(' + syminfo.ticker + '): Take Profit activated', comment_profit='TP', comment_loss='SL', comment_trailing='TSL', alert_trailing=alertatron_key_tsl_short)
+
+plot(series = fastMA, title='Fast SMA', color = color.blue, linewidth = 1, style = plot.style_line)
+plot(series = slowMA, title='Slow SMA', color = color.orange, linewidth = 1, style = plot.style_line)
+plot(series = longTakeProfitPrice, title='Long Take Profit', color = color.green, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = shortTakeProfitPrice, title='Short Take Profit', color = color.red, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = strategy.position_avg_price, title='Position', color = color.white, linewidth = 1, style = plot.style_linebr)

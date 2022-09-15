@@ -1,0 +1,207 @@
+//@version=5
+
+strategy(title='TTP_Bot_BB+VWAP', shorttitle='TTP Bot - BB+VWAP', overlay=true, pyramiding=0, process_orders_on_close=false, close_entries_rule='ANY', calc_on_every_tick=false, calc_on_order_fills=false, commission_type=strategy.commission.percent, commission_value=0.07, default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=100, currency=currency.USD, slippage=1) //, max_labels_count=500)
+
+import PineCoders/ConditionalAverages/1 as pc
+
+// ———————————————————— Constants and Inputs {
+
+int MS_IN_MIN   = 60 * 1000
+int MS_IN_HOUR  = MS_IN_MIN  * 60
+int MS_IN_DAY   = MS_IN_HOUR * 24
+
+var string TT_WINDOW = "By default, the time period used to calculate the RVWAP automatically adjusts with the chart's timeframe.
+  Check this to use a fixed-size time period instead, which you define with the following three values."
+var string TT_MINBARS = "The minimum number of last values to keep in the moving window, even if these values are outside the time period.
+  This avoids situations where a large time gap between two bars would cause the time window to be empty."
+var string TT_STDEV = "The multiplier for the standard deviation bands offset above and below the RVWAP. Example: 1.0 is 100% of the offset value. 
+  \n\nNOTE: A value of 0.0 will hide the bands."
+
+float srcInput        = input.source(hlc3, "Source", tooltip = "The source used to calculate the VWAP. The default is the average of the high, low and close prices.")
+
+var string GRP2       = '═══════════   Time Period   ═══════════'
+bool fixedTfInput     = input.bool(false, "Use a fixed time period", group = GRP2, tooltip = TT_WINDOW)
+int  daysInput        = input.int(1, "Days", minval = 0, maxval = 90, group = GRP2) * MS_IN_DAY
+int  hoursInput       = input.int(0, "Hours", minval = 0, maxval = 23, group = GRP2) * MS_IN_HOUR
+int  minsInput        = input.int(0, "Minutes", minval = 0, maxval = 59, group = GRP2) * MS_IN_MIN
+bool tableInput       = input.bool(true, "Show time period", group = GRP2, tooltip = "Displays the time period of the rolling window.")
+string textSizeInput  = input.string("large", "Text size", group = GRP2, options = ["tiny", "small", "normal", "large", "huge", "auto"])
+string tableYposInput = input.string("bottom", "Position     ", inline = "21", group = GRP2, options = ["top", "middle", "bottom"])
+string tableXposInput = input.string("right", "", inline = "21", group = GRP2, options = ["left", "center", "right"])
+
+var string GRP3       = '═════════  Deviation Bands  ═════════'
+stdevMult             = input.float(0.0, "Bands Multiplier", group=GRP3, minval = 0.0, step = 0.5, tooltip = TT_STDEV)
+
+var string GRP4       = '════════  Minimum Window Size  ════════'
+int  minBarsInput     = input.int(10, "Bars", group = GRP4, tooltip = TT_MINBARS)
+// }
+
+int fromDate = input.time(timestamp('01 Jan 2021 00:00 UTC'), 'From Date')
+int toDate = input.time(timestamp('31 Dec 2121 23:59 UTC'), 'To Date')
+float source = input.source(close, "BB Source")
+int length = input.int(20, minval=1)
+float mult = input.float(2.0, minval=0.001, maxval=50)
+bool direction = input.bool(true, title = "Use VWAP filter ?")
+bool atrfilter = input.bool(true, title = "Use ATR Filter ?")
+float atrpercent = input.float(1, "ATR %", minval=0.01, maxval=100)
+float longTakeProfitPerc = input.float(0.3, 'Long&Short Take Profit %', minval=0.05, step=0.05) * 0.01
+float shortTakeProfitPerc = longTakeProfitPerc//input.float(0.5, 'Short Take Profit %', minval=0.05, step=0.05) * 0.01
+bool enableTrailing = input.bool(true, 'Enable Trailing')
+float trailingTakeProfitPerc = input.float(0.2, 'Trailing Take Profit %', minval=0.01, maxval=100, step=0.01) * 0.01
+float PosAmountPercent= input.float(50, "Pos Size % of Equity", minval = 1, step=5, group='═══════════ Strategy Setting ═══════════', tooltip='Same As Order Size in the properties tab')
+float PanicStopPercent= input.float(1, "PanicStop % Price", minval = 0.1, step=0.5, group='═══════════ Strategy Setting ═══════════', tooltip=' (close)')
+bool spot = input.bool(false, "SPOT?")
+bool wunder = input.bool(false, "WunderTrading?", tooltip='By default for Alertatron, check the box to activate for WunderTrading')
+string wunder_key = input.string("wunder_key", title="Wunder Key", tooltip='Only the end of the key with the name of the bot and the number, ex: FTX-VXD-CEL-15M_15M_6507dc9b622017e3')
+float PanicStop   = close*(PanicStopPercent/100)
+
+// ———————————————————— Functions {
+
+timeStep() =>
+    // @function    Determines a time period from the chart's timeframe.
+    // @returns     (int) A value of time in milliseconds that is appropriate for the current chart timeframe. To be used in the RVWAP calculation.
+    int tfInMs = timeframe.in_seconds() * 1000
+    float step =
+      switch
+        tfInMs <= MS_IN_MIN        => MS_IN_HOUR
+        tfInMs <= MS_IN_MIN * 5    => MS_IN_HOUR * 4
+        tfInMs <= MS_IN_HOUR       => MS_IN_DAY * 1
+        tfInMs <= MS_IN_HOUR * 4   => MS_IN_DAY * 3
+        tfInMs <= MS_IN_HOUR * 12  => MS_IN_DAY * 7
+        tfInMs <= MS_IN_DAY        => MS_IN_DAY * 30.4375
+        tfInMs <= MS_IN_DAY * 7    => MS_IN_DAY * 90
+        => MS_IN_DAY * 365
+    int result = int(step)
+
+
+tfString(int timeInMs) =>
+    // @function    Produces a string corresponding to the input time in days, hours, and minutes.
+    // @param       (series int) A time value in milliseconds to be converted to a string variable. 
+    // @returns     (string) A string variable reflecting the amount of time from the input time.
+    int s  = timeInMs / 1000
+    int m  = s / 60
+    int h  = m / 60
+    int tm = math.floor(m % 60)
+    int th = math.floor(h % 24)
+    int d  = math.floor(h / 24)
+    string result = 
+      switch
+        d == 30 and th == 10 and tm == 30 => "1M"
+        d == 7  and th == 0  and tm == 0  => "1W"
+        =>
+            string dStr = d  ? str.tostring(d)  + "D "  : ""
+            string hStr = th ? str.tostring(th) + "H "  : ""
+            string mStr = tm ? str.tostring(tm) + "min" : ""
+            dStr + hStr + mStr
+// }
+
+
+
+// ———————————————————— Calculations and Plots {
+
+// Stop the indicator on charts with no volume.
+if barstate.islast and ta.cum(nz(volume)) == 0
+    runtime.error("No volume is provided by the data vendor.")
+
+// RVWAP + stdev bands
+var int timeInMs   = fixedTfInput ? minsInput + hoursInput + daysInput : timeStep()
+
+float sumSrcVol    = pc.totalForTimeWhen(srcInput * volume, timeInMs, true, minBarsInput)
+float sumVol       = pc.totalForTimeWhen(volume, timeInMs, true, minBarsInput)
+float sumSrcSrcVol = pc.totalForTimeWhen(volume * math.pow(srcInput, 2), timeInMs, true, minBarsInput)
+
+float rollingVWAP  = sumSrcVol / sumVol
+
+float variance = sumSrcSrcVol / sumVol - math.pow(rollingVWAP, 2)
+variance := variance < 0 ? 0 : variance
+
+float stDev = math.sqrt(variance)
+
+float upperBand = rollingVWAP + stDev * stdevMult
+float lowerBand = rollingVWAP - stDev * stdevMult
+
+plot(rollingVWAP, "Rolling VWAP", color.orange)
+
+p1 = plot(stdevMult != 0 ? upperBand : na, "Upper Band", color.green)
+p2 = plot(stdevMult != 0 ? lowerBand : na, "Lower Band", color.green)
+
+fill(p1, p2, color.new(color.green, 95), "Bands Fill")
+
+// Display of time period.
+var table tfDisplay = table.new(tableYposInput + "_" + tableXposInput, 1, 1)
+if tableInput
+    table.cell(tfDisplay, 0, 0, tfString(timeInMs), bgcolor = na, text_color = color.gray, text_size = textSizeInput)
+// }
+
+float basis = ta.sma(source, length)
+float dev = mult * ta.stdev(source, length)
+float upper = basis + dev
+float lower = basis - dev
+bool isWithinPeriod = time >= fromDate and time <= toDate
+bool openLongPosition = isWithinPeriod and ta.crossover(source, lower)
+bool openShortPosition = isWithinPeriod and ta.crossunder(source, upper)
+bool longIsActive = openLongPosition or strategy.position_size > 0
+bool shortIsActive = openShortPosition or strategy.position_size < 0
+
+float longTakeProfitPrice = na
+longTakeProfitPrice := if longIsActive
+    if openLongPosition and not (strategy.position_size > 0)
+        close * (1 + longTakeProfitPerc)
+    else
+        nz(longTakeProfitPrice[1], close * (1 + longTakeProfitPerc))
+else
+    na
+
+float shortTakeProfitPrice = na
+shortTakeProfitPrice := if shortIsActive
+    if openShortPosition and not (strategy.position_size < 0)
+        close * (1 - shortTakeProfitPerc)
+    else
+        nz(shortTakeProfitPrice[1], close * (1 - shortTakeProfitPrice))
+else
+    na
+
+float longTrailingTakeProfitStepTicks = longTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+float shortTrailingTakeProfitStepTicks = shortTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+
+
+// === Alertatron KEY ===//
+alertatron_key_enter_long  = 'cancel(which=all);market(position=0);market(side=buy, amount=' + str.tostring(PosAmountPercent) + '%);stopOrder(side=sell, amount=100%p, offset=' + str.tostring(PanicStop) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=sell, amount=100%p, triggerOffset=' + str.tostring(longTakeProfitPerc) + '%, offset=' + str.tostring(trailingTakeProfitPerc) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_long     = 'market(position=0);'
+alertatron_key_exit_long   = 'market(position=0);'
+alertatron_key_enter_short = 'cancel(which=all);market(position=0);market(side=sell, amount=' + str.tostring(PosAmountPercent) + '%);stopOrder(side=buy, amount=100%p, offset=' + str.tostring(PanicStop) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=buy, amount=100%p, triggerOffset=' + str.tostring(shortTakeProfitPerc) + '%, offset=' + str.tostring(trailingTakeProfitPerc) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_short    = 'market(position=0);'
+alertatron_key_exit_short  = 'market(position=0);'
+
+
+// === Wundertrading KEY ===///
+wunder_key_enter_long  = 'ENTER-LONG_' + wunder_key
+wunder_key_exit_long   = 'EXIT-LONG_'  + wunder_key
+wunder_key_enter_short = 'ENTER-SHORT_' + wunder_key
+wunder_key_exit_short  = 'EXIT-SHORT_'  + wunder_key
+
+if atrfilter==false
+    if (direction==true and rollingVWAP < close) or direction==false
+        strategy.entry(id = 'Long Entry', direction = strategy.long, when = openLongPosition, comment = 'Long', alert_message = not wunder ? alertatron_key_enter_long : wunder_key_enter_long)
+        strategy.exit(id = 'SL-TSL Long', from_entry = 'Long Entry', stop=(strategy.position_avg_price-PanicStop), limit = enableTrailing ? na : longTakeProfitPrice, trail_price = enableTrailing ? longTakeProfitPrice : na, trail_offset = enableTrailing ? longTrailingTakeProfitStepTicks : na, when = longIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long, alert_trailing= not wunder ? alertatron_key_tsl_long : wunder_key_exit_long)
+
+    if spot!=true
+        if (direction==true and rollingVWAP < close) or direction==false
+            strategy.entry(id = 'Short Entry', direction = strategy.short, when = openShortPosition, comment = 'Short', alert_message= not wunder ? alertatron_key_enter_short : wunder_key_enter_short)
+            strategy.exit(id = 'SL-TSL Short', from_entry = 'Short Entry', stop=(strategy.position_avg_price+PanicStop), limit = enableTrailing ? na : shortTakeProfitPrice, trail_price = enableTrailing ? shortTakeProfitPrice : na, trail_offset = enableTrailing ? shortTrailingTakeProfitStepTicks : na, when = shortIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short, alert_trailing= not wunder ? alertatron_key_tsl_short : wunder_key_exit_short)
+
+if atrfilter==true
+    if ((ta.atr(length = 14)/close)*100 > atrpercent)
+        strategy.entry(id = 'Long Entry', direction = strategy.long, when = openLongPosition, comment = 'Long', alert_message = not wunder ? alertatron_key_enter_long : wunder_key_enter_long)
+        strategy.exit(id = 'SL-TSL Long', from_entry = 'Long Entry', stop=(strategy.position_avg_price-PanicStop), limit = enableTrailing ? na : longTakeProfitPrice, trail_price = enableTrailing ? longTakeProfitPrice : na, trail_offset = enableTrailing ? longTrailingTakeProfitStepTicks : na, when = longIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long, alert_trailing= not wunder ? alertatron_key_tsl_long : wunder_key_exit_long)
+
+    if spot!=true
+        if (direction==true and rollingVWAP < close) or direction==false
+            strategy.entry(id = 'Short Entry', direction = strategy.short, when = openShortPosition, comment = 'Short', alert_message= not wunder ? alertatron_key_enter_short : wunder_key_enter_short)
+            strategy.exit(id = 'SL-TSL Short', from_entry = 'Short Entry', stop=(strategy.position_avg_price+PanicStop), limit = enableTrailing ? na : shortTakeProfitPrice, trail_price = enableTrailing ? shortTakeProfitPrice : na, trail_offset = enableTrailing ? shortTrailingTakeProfitStepTicks : na, when = shortIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short, alert_trailing= not wunder ? alertatron_key_tsl_short : wunder_key_exit_short)
+
+//plot(series = fastMA, title='Fast SMA', color = color.blue, linewidth = 1, style = plot.style_line)
+//plot(series = slowMA, title='Slow SMA', color = color.orange, linewidth = 1, style = plot.style_line)
+plot(series = longTakeProfitPrice, title='Long Take Profit', color = color.green, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = shortTakeProfitPrice, title='Short Take Profit', color = color.red, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = strategy.position_avg_price, title='Position', color = color.white, linewidth = 1, style = plot.style_linebr)

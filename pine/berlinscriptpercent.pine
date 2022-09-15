@@ -1,0 +1,107 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © hibana2077
+
+//@version=5
+strategy(title="BotzPh03n1x-Technische Universität Berlin",overlay=true, default_qty_type=strategy.cash, commission_value= 0.07, commission_type=strategy.commission.percent, slippage=1, currency=currency.USD, default_qty_value= 100, initial_capital= 100)
+
+//def and input
+source = close
+mg0 = 0.0
+mg1 = 0.0
+mg2 = 0.0
+mg3 = 0.0
+mg4 = 0.0
+mg5 = 0.0
+mg6 = 0.0
+mg7 = 0.0
+mg8 = 0.0
+length = input.int(20, minval=1)
+src = input(hlc3, title="Source")
+p = input.int(10, minval=1)
+x = input.int(1, minval=1)
+q = input.int(9, minval=1)
+n = input.int(120,title="Basic guides line")
+//trail_points= input.int(20, minval=1)
+trail_points_percent = input.float(0.1, minval=0.01)
+//trail_offset= input.int(5, minval=1)
+trail_offset_percent  = input.float(0.05, "TSL Offset %", minval = 0.01, step=0.01, group='═══════════ Strategy Setting ═══════════', tooltip='Take a snack and let profit run.')
+PosAmountUSD= input.float(50, "Pos Size USD", minval = 20, step=5, group='═══════════ Strategy Setting ═══════════', tooltip='Same As Order Size in the properties tab')
+PosAmount   = PosAmountUSD / close
+PosLeft     = PosAmountUSD / strategy.position_avg_price
+PanicStop   = (((strategy.max_drawdown / strategy.initial_capital)*close) + (((strategy.max_drawdown / strategy.initial_capital)*close)/3) != 0) ? ((strategy.max_drawdown / strategy.initial_capital)*close) + (((strategy.max_drawdown / strategy.initial_capital)*close)/5) : close/5
+takeProfitBull = strategy.position_avg_price + (strategy.position_avg_price * (trail_points_percent/100))
+takeProfitBear = strategy.position_avg_price - (strategy.position_avg_price * (trail_points_percent/100))
+tsl_offset_long  = takeProfitBull * (trail_offset_percent/100) / syminfo.mintick
+tsl_offset_short = takeProfitBear * (trail_offset_percent/100) / syminfo.mintick
+trail_points = (math.abs(takeProfitBull - strategy.position_avg_price)) * (trail_points_percent/100) / syminfo.mintick
+trail_price_long = strategy.position_avg_price + (strategy.position_avg_price * (trail_points_percent/100))
+trail_price_short = strategy.position_avg_price - (strategy.position_avg_price * (trail_points_percent/100))
+
+
+//McGinley
+src0 = ta.ema(source, 2)
+src1 = ta.ema(source, 3)
+src2 = ta.ema(source, 5)
+src3 = ta.ema(source, 8)
+src4 = ta.ema(source, 13)
+src5 = ta.ema(source, 21)
+src6 = ta.ema(source, 34)
+src7 = ta.ema(source, 55)
+src8 = ta.ema(source, 89)
+mg0 := na(mg0[1]) ? src0 : mg0[1] + (source - mg0[1]) / (2 * math.pow(source/mg0[1], 4))
+mg1 := na(mg1[1]) ? src1 : mg1[1] + (source - mg1[1]) / (3 * math.pow(source/mg1[1], 4))
+mg2 := na(mg2[1]) ? src2 : mg2[1] + (source - mg2[1]) / (5 * math.pow(source/mg2[1], 4))
+mg3 := na(mg3[1]) ? src3 : mg3[1] + (source - mg3[1]) / (8 * math.pow(source/mg3[1], 4))
+mg4 := na(mg4[1]) ? src4 : mg4[1] + (source - mg4[1]) / (13 * math.pow(source/mg4[1], 4))
+mg5 := na(mg5[1]) ? src5 : mg5[1] + (source - mg5[1]) / (21 * math.pow(source/mg5[1], 4))
+mg6 := na(mg6[1]) ? src6 : mg6[1] + (source - mg6[1]) / (34 * math.pow(source/mg6[1], 4))
+mg7 := na(mg7[1]) ? src7 : mg7[1] + (source - mg7[1]) / (55 * math.pow(source/mg7[1], 4))
+mg8 := na(mg8[1]) ? src8 : mg8[1] + (source - mg8[1]) / (89 * math.pow(source/mg8[1], 4))
+
+//stop and take
+first_high_stop = ta.highest(high, p) - x * ta.atr(p)
+first_low_stop = ta.lowest(low, p) + x * ta.atr(p)
+stop_short = ta.highest(first_high_stop, q)
+stop_long = ta.lowest(first_low_stop, q)
+
+
+//plot
+plot(mg0,color=color.fuchsia)
+plot(mg1,color=color.fuchsia)
+plot(mg2,color=color.fuchsia)
+plot(mg3,color=color.fuchsia)
+plot(mg4,color=color.fuchsia)
+plot(mg5,color=color.fuchsia)
+plot(mg6,color=color.fuchsia)
+plot(mg7,color=color.fuchsia)
+plot(mg8,color=color.fuchsia)
+plot(stop_long, color=#2962FF)
+plot(stop_short, color=#FF6D00)
+
+//cci
+ma = ta.sma(src, length)
+cci = (src - ma) / (0.015 * ta.dev(src, length))
+
+//single
+BUY=cci[0]>cci[1] and cci>100 and mg0>mg1 and mg0>mg2 and mg0>mg3 and mg0>mg4 and mg0>mg5 and mg2>mg3 and mg3>mg4
+SELL=cci[0]<cci[1] and cci<-100 and mg0<mg1 and mg0<mg2 and mg0<mg3 and mg0<mg4 and mg0<mg5 and mg2<mg3 and mg3<mg4
+
+// === Alertatron KEY ===// /
+alertatron_key_enter_long  = 'market(side=buy, amount=' + str.tostring(PosAmount) + ');stopOrder(side=sell, amount=' + str.tostring(PosAmount) + ', offset=@' + str.tostring(stop_long) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_tsl_long     = 'cancel(which=tagged, tag=stop' + str.tostring(syminfo.ticker) + ');trailingStop(side=sell, amount=' + str.tostring(PosAmount) + ', offset=' + str.tostring(trail_offset_percent) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_exit_long   = ''
+alertatron_key_enter_short = 'market(side=sell, amount=' + str.tostring(PosAmount) + ');stopOrder(side=buy, amount=' + str.tostring(PosAmount) + ', offset=@' + str.tostring(stop_short) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_tsl_short    = 'cancel(which=tagged, tag=stop' + str.tostring(syminfo.ticker) + ');trailingStop(side=buy, amount=' + str.tostring(PosAmount) + ', offset=' + str.tostring(trail_offset_percent) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ');'
+alertatron_key_exit_short  = ''
+
+//order
+if not strategy.opentrades
+    // Long Strategy
+    if BUY
+        strategy.entry("Long", strategy.long, comment='Buy!', alert_message=alertatron_key_enter_long)
+        strategy.exit("exit", "Long", stop=stop_long, trail_price=trail_price_long, trail_offset=tsl_offset_long, comment='Exit Long!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL', alert_message=alertatron_key_exit_long, alert_trailing=alertatron_key_tsl_long)
+    
+    // Short Strategy
+    if SELL
+        strategy.entry("Short", strategy.short, comment='Sell!', alert_message=alertatron_key_enter_short)
+        strategy.exit("exit","Short", stop=stop_short, trail_price=trail_price_short, trail_offset=tsl_offset_short, comment='Exit Short!', comment_profit='TP', comment_loss='SL', comment_trailing='TSL', alert_message=alertatron_key_exit_short, alert_trailing=alertatron_key_tsl_short)

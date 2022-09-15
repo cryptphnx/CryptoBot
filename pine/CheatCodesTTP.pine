@@ -1,0 +1,90 @@
+//@version=5
+strategy(title='TTP_Bot_Template', shorttitle='TTP Bot', overlay=true, pyramiding=0, process_orders_on_close=false, close_entries_rule='ANY', calc_on_every_tick=false, calc_on_order_fills=false, commission_type=strategy.commission.percent, commission_value=0.07, default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=100, currency=currency.USD, slippage=1) //, max_labels_count=500)
+
+fromDate = input.time(timestamp('01 Jan 2021 00:00 UTC'), 'From Date')
+toDate = input.time(timestamp('31 Dec 2121 23:59 UTC'), 'To Date')
+rsi_param = input.int(14, 'RSI Parameter')
+fastSma = input.int(21, 'FastSMA parameter')
+midSma = input.int(100, 'midSMA parameter')
+slowSma = input.int(200, 'slowSMA parameter')
+longTakeProfitPerc = input.float(0.5, 'Long&Short Take Profit %', minval=0.05, step=0.05) * 0.01
+shortTakeProfitPerc = longTakeProfitPerc//input.float(0.5, 'Short Take Profit %', minval=0.05, step=0.05) * 0.01
+enableTrailing = input.bool(true, 'Enable Trailing')
+trailingTakeProfitPerc = input.float(0.07, 'Trailing Take Profit %', minval=0.01, maxval=100, step=0.01) * 0.01
+PosAmountPercent= input.float(50, "Pos Size % of Equity", minval = 1, step=5, group='═══════════ Strategy Setting ═══════════', tooltip='Same As Order Size in the properties tab')
+PanicStopPercent= input.float(10, "PanicStop % Price", minval = 0.1, step=0.5, group='═══════════ Strategy Setting ═══════════', tooltip=' (close)')
+spot = input.bool(false, "SPOT?")
+wunder = input.bool(false, "WunderTrading?", tooltip='By default for Alertatron, check the box to activate for WunderTrading')
+wunder_key = input.string("wunder_key", title="Wunder Key", tooltip='Only the end of the key with the name of the bot and the number, ex: FTX-VXD-CEL-15M_15M_6507dc9b622017e3')
+PanicStop   = close*(PanicStopPercent/100)
+
+//RSIz
+
+rsi = ta.rsi(close, rsi_param)
+
+
+//ENTRYz
+
+LC1 = ta.crossover(ta.sma(close,fastSma), ta.sma(close,midSma))
+LC2 = ta.sma(close, slowSma) > close
+    
+SC1 = ta.sma(close, slowSma) < close
+SC2 = ta.crossunder(rsi, 55)
+
+bool isWithinPeriod = time >= fromDate and time <= toDate
+bool openLongPosition = isWithinPeriod and LC1 and LC2
+bool openShortPosition = isWithinPeriod and SC1 and SC2
+bool longIsActive = openLongPosition or strategy.position_size > 0
+bool shortIsActive = openShortPosition or strategy.position_size < 0
+
+float longTakeProfitPrice = na
+longTakeProfitPrice := if longIsActive
+    if openLongPosition and not (strategy.position_size > 0)
+        close * (1 + longTakeProfitPerc)
+    else
+        nz(longTakeProfitPrice[1], close * (1 + longTakeProfitPerc))
+else
+    na
+
+float shortTakeProfitPrice = na
+shortTakeProfitPrice := if shortIsActive
+    if openShortPosition and not (strategy.position_size < 0)
+        close * (1 - shortTakeProfitPerc)
+    else
+        nz(shortTakeProfitPrice[1], close * (1 - shortTakeProfitPrice))
+else
+    na
+
+float longTrailingTakeProfitStepTicks = longTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+float shortTrailingTakeProfitStepTicks = shortTakeProfitPrice * trailingTakeProfitPerc / syminfo.mintick
+
+
+// === Alertatron KEY ===//
+alertatron_key_enter_long  = 'cancel(which=all);market(position=0);market(side=buy, amount=' + str.tostring(PosAmountPercent) + '%);stopOrder(side=sell, amount=100%p, offset=' + str.tostring(PanicStop) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=sell, amount=100%p, triggerOffset=' + str.tostring(longTakeProfitPerc) + '%, offset=' + str.tostring(trailingTakeProfitPerc) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_long     = 'market(position=0);'
+alertatron_key_exit_long   = 'market(position=0);'
+alertatron_key_enter_short = 'cancel(which=all);market(position=0);market(side=sell, amount=' + str.tostring(PosAmountPercent) + '%);stopOrder(side=buy, amount=100%p, offset=' + str.tostring(PanicStop) + ', trigger=last, tag=stop' + str.tostring(syminfo.ticker) + ', reduceOnly=true);trailingTakeProfit(side=buy, amount=100%p, triggerOffset=' + str.tostring(shortTakeProfitPerc) + '%, offset=' + str.tostring(trailingTakeProfitPerc) + '%, trigger=last, tag=tsl' + str.tostring(syminfo.ticker) + ', reduceOnly=true);'
+alertatron_key_tsl_short    = 'market(position=0);'
+alertatron_key_exit_short  = 'market(position=0);'
+
+
+// === Wundertrading KEY ===///
+wunder_key_enter_long  = 'ENTER-LONG_' + wunder_key
+wunder_key_exit_long   = 'EXIT-LONG_'  + wunder_key
+wunder_key_enter_short = 'ENTER-SHORT_' + wunder_key
+wunder_key_exit_short  = 'EXIT-SHORT_'  + wunder_key
+
+
+strategy.entry(id = 'Long Entry', direction = strategy.long, when = openLongPosition, comment = 'Long', alert_message = not wunder ? alertatron_key_enter_long : wunder_key_enter_long)
+strategy.exit(id = 'SL-TSL Long', from_entry = 'Long Entry', stop=(strategy.position_avg_price-PanicStop), limit = enableTrailing ? na : longTakeProfitPrice, trail_price = enableTrailing ? longTakeProfitPrice : na, trail_offset = enableTrailing ? longTrailingTakeProfitStepTicks : na, when = longIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_long : wunder_key_exit_long, alert_trailing= not wunder ? alertatron_key_tsl_long : wunder_key_exit_long)
+
+if spot!=true
+    strategy.entry(id = 'Short Entry', direction = strategy.short, when = openShortPosition, comment = 'Short', alert_message= not wunder ? alertatron_key_enter_short : wunder_key_enter_short)
+    strategy.exit(id = 'SL-TSL Short', from_entry = 'Short Entry', stop=(strategy.position_avg_price+PanicStop), limit = enableTrailing ? na : shortTakeProfitPrice, trail_price = enableTrailing ? shortTakeProfitPrice : na, trail_offset = enableTrailing ? shortTrailingTakeProfitStepTicks : na, when = shortIsActive, comment_loss='SL', comment_trailing = 'TSL', comment_profit='TP', alert_loss= not wunder ? alertatron_key_exit_short : wunder_key_exit_short, alert_trailing= not wunder ? alertatron_key_tsl_short : wunder_key_exit_short)
+
+plot(series = fastSma, title='Fast SMA', color = color.green, linewidth = 1, style = plot.style_line)
+plot(series = midSma, title='Mid SMA', color = color.yellow linewidth = 2, style = plot.style_line)
+plot(series = slowSma, title='Slow SMA', color = color.red, linewidth = 3, style = plot.style_line)
+plot(series = longTakeProfitPrice, title='Long Take Profit', color = color.green, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = shortTakeProfitPrice, title='Short Take Profit', color = color.red, linewidth = 1, style = plot.style_cross, offset = 1)
+plot(series = strategy.position_avg_price, title='Position', color = color.white, linewidth = 1, style = plot.style_linebr)
